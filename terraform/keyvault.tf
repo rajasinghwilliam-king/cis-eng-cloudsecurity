@@ -8,7 +8,7 @@ resource "azurerm_key_vault" "this" {
   location                      = azurerm_resource_group.this.location
   tenant_id                     = local.tenant_id
   sku_name                      = local.key_vault_sku
-  enable_rbac_authorization     = true
+  rbac_authorization_enabled    = true
   purge_protection_enabled      = local.key_vault_purge_protection
   soft_delete_retention_days    = local.key_vault_soft_delete_retention
   public_network_access_enabled = false

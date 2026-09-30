@@ -5,6 +5,6 @@ data "archive_file" "package" {
   count = var.deploy_package ? 1 : 0
 
   type        = "zip"
-  source_dir  = "${path.module}/${var.package_source_dir}"
+  source_dir  = var.package_source_dir
   output_path = "${path.module}/.builds/${local.function_app_name}.zip"
 }

@@ -47,7 +47,7 @@ resource "azurerm_storage_account" "this" {
 resource "azurerm_storage_container" "deployments" {
   count                 = var.deploy_package ? 1 : 0
   name                  = "deployments"
-  storage_account_name  = azurerm_storage_account.this.name
+  storage_account_id    = azurerm_storage_account.this.id
   container_access_type = "private"
 }
 
