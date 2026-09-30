@@ -57,10 +57,29 @@ Each JSON is the single reusable source of truth for an environment. Terraform r
 > only holds the app registration's (non-sensitive) `client_id` / `tenant_id`; access is granted by
 > a federated credential on that app registration.
 
-## 2. Application code (`src/`)
+## 2. Application code (`src/`) — Cloud Security Assessment app
 
-`src/` is the Function App project. Add one workflow per class under `src/Workflows/`
-(`HelloWorkflow.cs` is a sample Durable Functions orchestration + activity + HTTP starter).
+`src/` is the .NET 8 isolated Durable Functions project. It runs security-framework assessments
+(Zero Trust, ISO 27001, CIS Azure, CIS AWS) against a **target** environment and returns findings
+grouped by High / Medium / Low.
+
+- `Assessments/Models.cs` — request, finding, severity, and result models.
+- `Assessments/Catalog.cs` — the check catalog per framework and the `ICloudConnector` abstraction.
+  A deterministic `StubCloudConnector` ships so the app runs end-to-end today; replace it (and
+  `CloudConnectorFactory`) with real **Azure** (`Azure.Identity` + ARM/Graph) and **AWS** (AWS SDK)
+  logic that connects using the supplied target tenant + service principal / role.
+- `Workflows/AssessmentWorkflow.cs` — Durable orchestration (fan-out/fan-in over checks), the
+  `RunCheck` activity, and the `POST /api/assessments` starter.
+- `Api/WebUi.cs` + `ui/index.html` — the UST-branded single-page UI, served at `GET /api/ui`.
+
+**Endpoints**
+- `GET /api/ui` — the web UI.
+- `POST /api/assessments` — start an assessment; returns Durable status URLs the UI polls.
+
+> **Credentials:** the target service-principal secret is used only to connect for the assessment.
+> Use a least-privilege (read-only) principal and store secrets in Key Vault in production — never log them.
+> The endpoints are `Anonymous` because the private endpoint is the network boundary; add Entra
+> (Easy Auth) if you need user-level auth.
 
 ## 3. Pipeline (`.github/workflows/deploy.yml`)
 

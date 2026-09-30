@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>UST — Cloud Security Assessment</title>
+  <style>
+    :root {
+      --ust-navy: #10162f;
+      --ust-navy-2: #1b2347;
+      --ust-orange: #ff5a00;
+      --bg: #f4f6fb;
+      --card: #ffffff;
+      --ink: #1c2233;
+      --muted: #6b7280;
+      --line: #e5e8f0;
+      --high: #e5322d;
+      --medium: #f5a623;
+      --low: #2fa84f;
+      --info: #5b6472;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Segoe UI", system-ui, Arial, sans-serif; background: var(--bg); color: var(--ink); }
+    header {
+      background: linear-gradient(90deg, var(--ust-navy), var(--ust-navy-2));
+      color: #fff; padding: 18px 28px; display: flex; align-items: center; gap: 16px;
+    }
+    .logo { font-weight: 800; letter-spacing: 1px; font-size: 22px; }
+    .logo span { color: var(--ust-orange); }
+    header .title { font-size: 15px; opacity: .85; border-left: 1px solid rgba(255,255,255,.25); padding-left: 16px; }
+    .wrap { max-width: 1200px; margin: 24px auto; padding: 0 16px; display: grid; grid-template-columns: 340px 1fr; gap: 20px; }
+    @media (max-width: 900px) { .wrap { grid-template-columns: 1fr; } }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; box-shadow: 0 1px 2px rgba(16,22,47,.04); }
+    .card h2 { margin: 0 0 14px; font-size: 15px; text-transform: uppercase; letter-spacing: .5px; color: var(--ust-navy); }
+    label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 5px; }
+    input[type=text], input[type=password], select {
+      width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; background: #fbfcfe;
+    }
+    .frameworks { display: grid; gap: 8px; margin-top: 6px; }
+    .frameworks label { display: flex; align-items: center; gap: 9px; font-weight: 500; margin: 0; cursor: pointer; }
+    .note { font-size: 11.5px; color: var(--muted); margin-top: 6px; line-height: 1.4; }
+    .btn {
+      margin-top: 18px; width: 100%; background: var(--ust-orange); color: #fff; border: 0; border-radius: 8px;
+      padding: 12px; font-size: 15px; font-weight: 700; cursor: pointer;
+    }
+    .btn:disabled { opacity: .55; cursor: default; }
+    .aws { display: none; }
+
+    .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
+    @media (max-width: 620px) { .summary { grid-template-columns: repeat(2, 1fr); } }
+    .tile { border-radius: 12px; padding: 16px; color: #fff; }
+    .tile .n { font-size: 30px; font-weight: 800; line-height: 1; }
+    .tile .l { font-size: 12px; text-transform: uppercase; letter-spacing: .6px; margin-top: 6px; opacity: .95; }
+    .t-high { background: var(--high); } .t-medium { background: var(--medium); }
+    .t-low { background: var(--low); } .t-total { background: var(--ust-navy); }
+
+    .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .chip { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 5px 12px; font-size: 13px; cursor: pointer; }
+    .chip.active { background: var(--ust-navy); color: #fff; border-color: var(--ust-navy); }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    th, td { text-align: left; padding: 10px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+    .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; color: #fff; font-size: 11px; font-weight: 700; }
+    .b-High { background: var(--high); } .b-Medium { background: var(--medium); }
+    .b-Low { background: var(--low); } .b-Informational { background: var(--info); }
+    .status-Pass { color: var(--low); font-weight: 700; } .status-Fail { color: var(--high); font-weight: 700; }
+    .muted { color: var(--muted); }
+    .empty { text-align: center; color: var(--muted); padding: 40px 10px; }
+    .spinner { display: inline-block; width: 16px; height: 16px; border: 3px solid rgba(255,255,255,.5); border-top-color: #fff; border-radius: 50%; animation: spin 1s linear infinite; vertical-align: -3px; margin-right: 8px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">U<span>S</span>T</div>
+    <div class="title">Cloud Security Assessment Platform</div>
+  </header>
+
+  <div class="wrap">
+    <!-- Configuration -->
+    <form class="card" id="form">
+      <h2>Target environment</h2>
+
+      <label>Cloud</label>
+      <select id="cloud">
+        <option value="azure">Microsoft Azure</option>
+        <option value="aws">Amazon Web Services</option>
+      </select>
+
+      <div id="azureFields">
+        <label>Target Tenant ID</label>
+        <input type="text" id="targetTenantId" placeholder="00000000-0000-0000-0000-000000000000" />
+        <label>Subscription ID</label>
+        <input type="text" id="subscriptionId" placeholder="optional" />
+        <label>Service Principal — Client ID</label>
+        <input type="text" id="clientId" placeholder="app registration (client) id" />
+        <label>Service Principal — Client Secret</label>
+        <input type="password" id="clientSecret" placeholder="secret" autocomplete="off" />
+      </div>
+
+      <div id="awsFields" class="aws">
+        <label>AWS Account ID</label>
+        <input type="text" id="awsAccountId" placeholder="123456789012" />
+        <label>Assume Role ARN</label>
+        <input type="text" id="awsRoleArn" placeholder="arn:aws:iam::123456789012:role/Assessment" />
+      </div>
+
+      <label>Assessments</label>
+      <div class="frameworks" id="frameworks"></div>
+
+      <div class="note">
+        Credentials are used only to connect to the target for this assessment. Use a
+        least-privilege (read-only) service principal / role. In production store the secret in Key Vault.
+      </div>
+
+      <button type="submit" class="btn" id="runBtn">Run assessment</button>
+    </form>
+
+    <!-- Results -->
+    <div class="card" id="results">
+      <h2>Results</h2>
+      <div id="status" class="empty">Configure a target and run an assessment to see results.</div>
+
+      <div id="output" style="display:none">
+        <div class="summary">
+          <div class="tile t-high"><div class="n" id="cHigh">0</div><div class="l">High</div></div>
+          <div class="tile t-medium"><div class="n" id="cMedium">0</div><div class="l">Medium</div></div>
+          <div class="tile t-low"><div class="n" id="cLow">0</div><div class="l">Low</div></div>
+          <div class="tile t-total"><div class="n" id="cTotal">0</div><div class="l">Checks</div></div>
+        </div>
+
+        <div class="filters" id="filters">
+          <span class="chip active" data-f="all">All</span>
+          <span class="chip" data-f="fail">Failed only</span>
+          <span class="chip" data-f="High">High</span>
+          <span class="chip" data-f="Medium">Medium</span>
+          <span class="chip" data-f="Low">Low</span>
+        </div>
+
+        <table>
+          <thead>
+            <tr><th>Severity</th><th>Check</th><th>Framework</th><th>Status</th><th>Recommendation</th></tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <footer>UST — Cloud Security Assessment Platform · Confidential</footer>
+
+  <script>
+    const FRAMEWORKS = [
+      { key: "zero-trust", name: "Zero Trust" },
+      { key: "iso-27001", name: "ISO 27001" },
+      { key: "cis-azure", name: "CIS Benchmark — Azure" },
+      { key: "cis-aws", name: "CIS Benchmark — AWS" },
+    ];
+
+    const fwEl = document.getElementById("frameworks");
+    FRAMEWORKS.forEach(f => {
+      const id = "fw-" + f.key;
+      fwEl.insertAdjacentHTML("beforeend",
+        `<label><input type="checkbox" value="${f.key}" id="${id}" checked> ${f.name}</label>`);
+    });
+
+    const cloud = document.getElementById("cloud");
+    cloud.addEventListener("change", () => {
+      const aws = cloud.value === "aws";
+      document.getElementById("awsFields").style.display = aws ? "block" : "none";
+      document.getElementById("azureFields").style.display = aws ? "none" : "block";
+    });
+
+    let lastFindings = [];
+    let activeFilter = "all";
+
+    document.getElementById("filters").addEventListener("click", e => {
+      if (!e.target.dataset.f) return;
+      activeFilter = e.target.dataset.f;
+      document.querySelectorAll(".chip").forEach(c => c.classList.toggle("active", c === e.target));
+      renderRows();
+    });
+
+    function renderRows() {
+      const rows = document.getElementById("rows");
+      let items = lastFindings;
+      if (activeFilter === "fail") items = items.filter(f => f.status === "Fail");
+      else if (["High", "Medium", "Low"].includes(activeFilter)) items = items.filter(f => f.severity === activeFilter);
+
+      if (!items.length) { rows.innerHTML = `<tr><td colspan="5" class="empty">No matching findings.</td></tr>`; return; }
+      rows.innerHTML = items.map(f => `
+        <tr>
+          <td><span class="badge b-${f.severity}">${f.severity}</span></td>
+          <td>${escapeHtml(f.title)}</td>
+          <td class="muted">${escapeHtml(f.framework)}</td>
+          <td class="status-${f.status}">${f.status}</td>
+          <td class="muted">${escapeHtml(f.recommendation || (f.status === "Pass" ? "—" : ""))}</td>
+        </tr>`).join("");
+    }
+
+    function escapeHtml(s) { return (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+    function setStatus(html) { document.getElementById("status").innerHTML = html; }
+
+    document.getElementById("form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const frameworks = [...document.querySelectorAll("#frameworks input:checked")].map(i => i.value);
+      if (!frameworks.length) { alert("Select at least one assessment."); return; }
+
+      const body = {
+        cloud: cloud.value,
+        frameworks,
+        targetTenantId: document.getElementById("targetTenantId").value.trim(),
+        subscriptionId: document.getElementById("subscriptionId").value.trim(),
+        clientId: document.getElementById("clientId").value.trim(),
+        clientSecret: document.getElementById("clientSecret").value,
+        awsAccountId: document.getElementById("awsAccountId").value.trim(),
+        awsRoleArn: document.getElementById("awsRoleArn").value.trim(),
+      };
+
+      const btn = document.getElementById("runBtn");
+      btn.disabled = true;
+      document.getElementById("output").style.display = "none";
+      document.getElementById("status").style.display = "block";
+      setStatus(`<span class="spinner"></span>Starting assessment…`);
+
+      try {
+        const start = await fetch("/api/assessments", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        });
+        if (!start.ok) { setStatus("Failed to start: " + (await start.text())); btn.disabled = false; return; }
+        const status = await start.json();
+        const result = await poll(status.statusQueryGetUri);
+        render(result);
+      } catch (err) {
+        setStatus("Error: " + err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    async function poll(uri) {
+      setStatus(`<span class="spinner"></span>Running checks against the target…`);
+      for (let i = 0; i < 60; i++) {
+        const r = await fetch(uri);
+        const j = await r.json();
+        if (j.runtimeStatus === "Completed") return j.output;
+        if (["Failed", "Terminated"].includes(j.runtimeStatus)) throw new Error("Assessment " + j.runtimeStatus);
+        await new Promise(res => setTimeout(res, 2000));
+      }
+      throw new Error("Timed out waiting for results.");
+    }
+
+    function render(result) {
+      lastFindings = result.findings || [];
+      const s = result.summary || {};
+      document.getElementById("cHigh").textContent = s.high || 0;
+      document.getElementById("cMedium").textContent = s.medium || 0;
+      document.getElementById("cLow").textContent = s.low || 0;
+      document.getElementById("cTotal").textContent = s.total || 0;
+      document.getElementById("status").style.display = "none";
+      document.getElementById("output").style.display = "block";
+      renderRows();
+    }
+  </script>
+</body>
+</html>

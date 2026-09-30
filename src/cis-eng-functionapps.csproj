@@ -23,4 +23,9 @@
     </None>
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The single-page UST UI is embedded and served by the WebUi function. -->
+    <EmbeddedResource Include="ui\index.html" />
+  </ItemGroup>
+
 </Project>
