@@ -63,7 +63,7 @@ resource "azurerm_storage_blob" "package" {
   count = var.deploy_package ? 1 : 0
   # Hash in the name makes the run-from-package URL change on new content, forcing a reload.
   name                   = "package-${var.package_hash}.zip"
-  storage_account_id     = azurerm_storage_account.this.id
+  storage_account_name   = azurerm_storage_account.this.name
   storage_container_name = azurerm_storage_container.deployments[0].name
   type                   = "Block"
   source                 = var.package_path
