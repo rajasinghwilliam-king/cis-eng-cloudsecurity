@@ -85,11 +85,6 @@ jobs:
             -backend-config="container_name=${{ steps.cfg.outputs.state_container }}" \
             -backend-config="key=${{ steps.cfg.outputs.state_key }}"
 
-      - name: Detect runner public IP
-        id: agentip
-        shell: bash
-        run: echo "ip=$(curl -s https://api.ipify.org)" >> "$GITHUB_OUTPUT"
-
       - name: Terraform apply
         working-directory: terraform
         env:
@@ -100,22 +95,4 @@ jobs:
         run: |
           terraform apply -input=false -auto-approve \
             -var="environment=${{ steps.env.outputs.name }}" \
-            -var="package_source_dir=${{ github.workspace }}/publish" \
-            -var="deploy_agent_ip=${{ steps.agentip.outputs.ip }}"
-
-      # Always revoke the temporary IP so the storage account returns to fully private,
-      # even if the apply above failed. This only updates the account's network settings
-      # (control-plane) and does not re-upload the package.
-      - name: Re-lock storage (revoke runner IP)
-        if: always()
-        working-directory: terraform
-        env:
-          ARM_USE_OIDC: "true"
-          ARM_CLIENT_ID: ${{ steps.cfg.outputs.client_id }}
-          ARM_TENANT_ID: ${{ steps.cfg.outputs.tenant_id }}
-          ARM_SUBSCRIPTION_ID: ${{ steps.cfg.outputs.subscription_id }}
-        run: |
-          terraform apply -input=false -auto-approve \
-            -var="environment=${{ steps.env.outputs.name }}" \
-            -var="package_source_dir=${{ github.workspace }}/publish" \
-            -var="deploy_agent_ip="
+            -var="package_source_dir=${{ github.workspace }}/publish"

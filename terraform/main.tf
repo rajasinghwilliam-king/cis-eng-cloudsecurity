@@ -53,17 +53,18 @@ module "function_app" {
     KEY_VAULT_URI = azurerm_key_vault.this.vault_uri
   })
 
-  storage_account_name     = local.storage_account_name
-  storage_replication_type = local.storage_replication_type
+  storage_account_name          = local.storage_account_name
+  storage_replication_type      = local.storage_replication_type
+  storage_public_network_access = local.storage_public_network_access
+  storage_allowed_ip_rules      = local.storage_allowed_ip_rules
 
   integration_subnet_id                  = data.azurerm_subnet.integration.id
   application_insights_connection_string = azurerm_application_insights.this.connection_string
 
   # Code deployment (zip -> run-from-package)
-  deploy_package  = var.deploy_package
-  package_path    = var.deploy_package ? data.archive_file.package[0].output_path : null
-  package_hash    = var.deploy_package ? data.archive_file.package[0].output_md5 : null
-  deploy_agent_ip = var.deploy_agent_ip
+  deploy_package = var.deploy_package
+  package_path   = var.deploy_package ? data.archive_file.package[0].output_path : null
+  package_hash   = var.deploy_package ? data.archive_file.package[0].output_md5 : null
 
   tags = local.common_tags
 }

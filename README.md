@@ -134,23 +134,26 @@ terraform apply -var="environment=dev" -var="package_source_dir=../publish"
 
 ## Important: deploying into a private network
 
-The Function App and its storage have **public access disabled**. Terraform's control-plane calls
-(create resources, read subnets, create the blob *container*) work from anywhere, but **uploading the
-package blob is a data-plane operation** a public GitHub-hosted runner can't reach on a private account.
+Uploading the package blob is a **data-plane operation** a public GitHub-hosted runner can't reach on a
+fully-private storage account. Storage public access is therefore a **per-environment toggle** in the
+JSON `storage` block:
 
-**How this repo handles it (temporary IP exception):** the pipeline detects the runner's public IP and
-passes it as `deploy_agent_ip`. The storage account then turns its public endpoint on but locked to
-**only that IP** (`default_action = Deny`) for the upload, and a final `always()` step re-applies with
-`deploy_agent_ip=""` to return the account to **fully private** (private endpoints only) — even if the
-deploy failed. The app itself always reads the package over its blob **private endpoint**, so runtime
-stays private throughout. See [deploy.yml](.github/workflows/deploy.yml) and `deploy_agent_ip` in
-[terraform/variables.tf](terraform/variables.tf).
+```json
+"storage": {
+  "public_network_access": true,   // dev: on so cloud runners can upload
+  "allowed_ip_rules": []           // empty + public on => open (Allow); add CIDRs => Deny + allowlist
+}
+```
 
-The deployment identity needs **Contributor** on the account (to list keys for the blob upload), which
-the OIDC app registration already has. Alternatives if you'd rather not open any public window:
+- **dev** → `public_network_access: true` for the demo (private endpoints still apply; the app uses them).
+- **prd** → `public_network_access: false` — fully private.
 
-- Run the pipeline on a **self-hosted / VNet-injected runner** (e.g. Azure Container Apps job), or
-- Set `deploy_package=false` to provision infra only and deploy code separately from inside the network.
+> **Interim, for the demo only.** After architectural sign-off, dev switches to `false` too and
+> deployments run on a **self-hosted runner with private-endpoint connectivity** (e.g. an Azure
+> Container Apps job in the VNet), so no public access is ever needed. Check whether an Azure Policy
+> blocks public storage accounts before relying on this.
+
+Alternatively, set `deploy_package=false` to provision infra only and deploy the code from inside the network.
 
 ## Notes
 

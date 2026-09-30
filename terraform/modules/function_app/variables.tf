@@ -45,6 +45,18 @@ variable "storage_replication_type" {
   default     = "LRS"
 }
 
+variable "storage_public_network_access" {
+  type        = bool
+  description = "Enable the storage account's public endpoint (private endpoints still apply). Keep false for fully private."
+  default     = false
+}
+
+variable "storage_allowed_ip_rules" {
+  type        = list(string)
+  description = "IP/CIDR allowlist for the storage public endpoint. Empty + public access on => open (Allow); non-empty => Deny + allowlist. Ignored when public access is off."
+  default     = []
+}
+
 variable "functions_worker_runtime" {
   type        = string
   description = "Functions worker runtime."
@@ -100,12 +112,6 @@ variable "package_path" {
 variable "package_hash" {
   type        = string
   description = "Content hash of the package, used in the blob name to force a reload on change. Required when deploy_package is true."
-  default     = null
-}
-
-variable "deploy_agent_ip" {
-  type        = string
-  description = "Public IP of the deploy agent/runner to temporarily allow on the storage account for the package upload. Null/empty keeps the account fully private (private endpoints only)."
   default     = null
 }
 

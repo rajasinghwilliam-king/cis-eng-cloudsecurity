@@ -15,6 +15,11 @@
   "dotnet_version": "v8.0",
   "storage_replication_type": "ZRS",
 
+  "storage": {
+    "public_network_access": false,
+    "allowed_ip_rules": []
+  },
+
   "key_vault": {
     "sku": "standard",
     "purge_protection_enabled": true,

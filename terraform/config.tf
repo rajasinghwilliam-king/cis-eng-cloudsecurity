@@ -18,6 +18,11 @@ locals {
   dotnet_version           = try(local.config.dotnet_version, "v8.0")
   storage_replication_type = try(local.config.storage_replication_type, "LRS")
 
+  # Storage public access toggle (demo: dev on, prd private). Empty allowed_ip_rules with
+  # public access on => open (default Allow); provide CIDRs => Deny + allowlist.
+  storage_public_network_access = try(local.config.storage.public_network_access, false)
+  storage_allowed_ip_rules      = try(local.config.storage.allowed_ip_rules, [])
+
   key_vault_sku                   = try(local.config.key_vault.sku, "standard")
   key_vault_purge_protection      = try(local.config.key_vault.purge_protection_enabled, false)
   key_vault_soft_delete_retention = try(local.config.key_vault.soft_delete_retention_days, 7)

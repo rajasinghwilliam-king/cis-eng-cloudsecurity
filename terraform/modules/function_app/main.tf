@@ -17,9 +17,10 @@ resource "azurerm_service_plan" "this" {
 ########################################
 
 locals {
-  # When a deploy-agent IP is supplied (CI package upload), the public endpoint is turned on
-  # but locked to that single IP. Otherwise the account stays fully private (private endpoints only).
-  deploy_ip_allowed = var.deploy_agent_ip != null && var.deploy_agent_ip != ""
+  # Open (Allow) only when the public endpoint is on AND no IP allowlist is given;
+  # otherwise Deny (fully private when public access is off, or public + IP allowlist).
+  storage_default_action = var.storage_public_network_access && length(var.storage_allowed_ip_rules) == 0 ? "Allow" : "Deny"
+  storage_ip_rules       = var.storage_public_network_access ? var.storage_allowed_ip_rules : []
 }
 
 resource "azurerm_storage_account" "this" {
@@ -31,15 +32,15 @@ resource "azurerm_storage_account" "this" {
   account_kind                    = "StorageV2"
   min_tls_version                 = "TLS1_2"
   https_traffic_only_enabled      = true
-  public_network_access_enabled   = local.deploy_ip_allowed
+  public_network_access_enabled   = var.storage_public_network_access
   allow_nested_items_to_be_public = false
   shared_access_key_enabled       = true
   tags                            = var.tags
 
   network_rules {
-    default_action = "Deny"
+    default_action = local.storage_default_action
     bypass         = ["AzureServices"]
-    ip_rules       = local.deploy_ip_allowed ? [var.deploy_agent_ip] : []
+    ip_rules       = local.storage_ip_rules
   }
 }
 

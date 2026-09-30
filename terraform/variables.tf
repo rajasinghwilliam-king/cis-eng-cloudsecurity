@@ -26,12 +26,6 @@ variable "package_source_dir" {
   default     = "../src"
 }
 
-variable "deploy_agent_ip" {
-  type        = string
-  description = "Public IP of the deploy runner to temporarily allow on the Function App storage account so it can upload the package. Leave null for a fully-private account (private endpoints only)."
-  default     = null
-}
-
 variable "region_short_names" {
   type        = map(string)
   description = "Map of Azure region long name -> short token used in resource names."
