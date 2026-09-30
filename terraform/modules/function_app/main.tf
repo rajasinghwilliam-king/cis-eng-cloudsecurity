@@ -70,8 +70,11 @@ resource "azurerm_role_assignment" "package_reader" {
 }
 
 locals {
-  base_app_settings = {
-    FUNCTIONS_WORKER_RUNTIME                 = var.functions_worker_runtime
+  # The WEBSITE_CONTENT* settings apply ONLY to Consumption (Y1) and Elastic Premium (EPx)
+  # plans. On a Dedicated plan (B/S/P...) they are unnecessary and can cause content-share issues.
+  needs_content_share = can(regex("^(EP|Y)", var.app_service_plan_sku))
+
+  content_share_settings = local.needs_content_share ? {
     WEBSITE_CONTENTAZUREFILECONNECTIONSTRING = azurerm_storage_account.this.primary_connection_string
     WEBSITE_CONTENTSHARE                     = lower(var.function_app_name)
     # Route content share traffic through the VNet so it can reach the storage
@@ -81,7 +84,11 @@ locals {
     # for content-share validation at deploy time. Skip that check; the platform
     # provisions the share over the VNet on first run.
     WEBSITE_SKIP_CONTENTSHARE_VALIDATION = "1"
-  }
+  } : {}
+
+  base_app_settings = merge({
+    FUNCTIONS_WORKER_RUNTIME = var.functions_worker_runtime
+  }, local.content_share_settings)
 
   # Run-from-package points at the uploaded blob. A URL with no SAS token makes the
   # platform authenticate with the app's system-assigned managed identity.

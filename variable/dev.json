@@ -7,9 +7,9 @@
   "location": "uksouth",
   "instance": "001",
 
-  "app_service_plan_sku": "EP1",
+  "app_service_plan_sku": "S1",
   "os_type": "Windows",
-  "always_on": false,
+  "always_on": true,
   "zone_balancing_enabled": false,
   "functions_worker_runtime": "dotnet-isolated",
   "dotnet_version": "v8.0",
