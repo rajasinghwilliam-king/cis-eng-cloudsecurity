@@ -45,7 +45,7 @@ output "key_vault_uri" {
 
 output "key_vault_private_endpoint_ip" {
   description = "Private IP of the Key Vault private endpoint."
-  value       = module.key_vault_private_endpoint.private_ip_address
+  value       = one(module.key_vault_private_endpoint[*].private_ip_address)
 }
 
 output "application_insights_connection_string" {
@@ -56,7 +56,7 @@ output "application_insights_connection_string" {
 
 output "function_app_private_endpoint_ip" {
   description = "Private IP of the Function App private endpoint."
-  value       = module.function_app_private_endpoint.private_ip_address
+  value       = one(module.function_app_private_endpoint[*].private_ip_address)
 }
 
 output "storage_private_endpoint_ips" {

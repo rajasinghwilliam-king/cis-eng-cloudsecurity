@@ -37,6 +37,10 @@ locals {
   app_settings      = try(local.config.app_settings, {})
   extra_tags        = try(local.config.tags, {})
 
+  # When false, Terraform does NOT create private endpoints or private DNS — you attach the
+  # private links (and DNS) manually. The resources are still created with public access disabled.
+  manage_private_endpoints = try(local.config.manage_private_endpoints, true)
+
   # Private DNS zone resolution, in priority order:
   #  1. create_private_dns_zones = true  -> Terraform creates + VNet-links the zones (greenfield tenant).
   #  2. private_dns_zone_resource_group set -> look up EXISTING central zones by name (no create/link).

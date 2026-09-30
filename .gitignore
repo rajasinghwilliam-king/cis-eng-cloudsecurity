@@ -32,3 +32,6 @@ publish/
 **/bin/
 **/obj/
 node_modules/
+
+# Azure Functions local settings (may hold secrets/connection strings)
+local.settings.json

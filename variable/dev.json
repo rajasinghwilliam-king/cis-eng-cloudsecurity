@@ -34,7 +34,7 @@
   },
 
   "create_private_dns_zones": false,
-  "private_dns_zone_resource_group": "REPLACE_WITH_CENTRAL_DNS_RG",
+  "private_dns_zone_resource_group": "rg-network-dev",
   "private_dns_zone_ids": {},
 
   "service_principal": {

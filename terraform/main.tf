@@ -76,6 +76,7 @@ module "function_app" {
 
 module "function_app_private_endpoint" {
   source = "./modules/private_endpoint"
+  count  = local.manage_private_endpoints ? 1 : 0
 
   name                 = "pep-${local.function_app_name}"
   location             = azurerm_resource_group.this.location
@@ -93,7 +94,7 @@ module "function_app_private_endpoint" {
 
 module "storage_private_endpoints" {
   source   = "./modules/private_endpoint"
-  for_each = toset(local.storage_subresources)
+  for_each = local.manage_private_endpoints ? toset(local.storage_subresources) : toset([])
 
   name                 = "pep-${local.storage_account_name}-${each.key}"
   location             = azurerm_resource_group.this.location

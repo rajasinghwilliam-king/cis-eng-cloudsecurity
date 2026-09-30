@@ -34,6 +34,7 @@ resource "azurerm_role_assignment" "func_kv_secrets_user" {
 # Private endpoint for the vault (subresource "vault").
 module "key_vault_private_endpoint" {
   source = "./modules/private_endpoint"
+  count  = local.manage_private_endpoints ? 1 : 0
 
   name                 = "pep-${local.key_vault_name}"
   location             = azurerm_resource_group.this.location
