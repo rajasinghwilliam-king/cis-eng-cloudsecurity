@@ -83,7 +83,7 @@ module "function_app_private_endpoint" {
   subnet_id            = data.azurerm_subnet.private_endpoint.id
   target_resource_id   = module.function_app.function_app_id
   subresource_names    = ["sites"]
-  private_dns_zone_ids = try([local.private_dns_zone_ids["sites"]], [])
+  private_dns_zone_ids = try([local.effective_private_dns_zone_ids["sites"]], [])
   tags                 = local.common_tags
 }
 
@@ -101,6 +101,6 @@ module "storage_private_endpoints" {
   subnet_id            = data.azurerm_subnet.private_endpoint.id
   target_resource_id   = module.function_app.storage_account_id
   subresource_names    = [each.key]
-  private_dns_zone_ids = try([local.private_dns_zone_ids[each.key]], [])
+  private_dns_zone_ids = try([local.effective_private_dns_zone_ids[each.key]], [])
   tags                 = local.common_tags
 }

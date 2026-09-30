@@ -41,6 +41,6 @@ module "key_vault_private_endpoint" {
   subnet_id            = data.azurerm_subnet.private_endpoint.id
   target_resource_id   = azurerm_key_vault.this.id
   subresource_names    = ["vault"]
-  private_dns_zone_ids = try([local.private_dns_zone_ids["vault"]], [])
+  private_dns_zone_ids = try([local.effective_private_dns_zone_ids["vault"]], [])
   tags                 = local.common_tags
 }
