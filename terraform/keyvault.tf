@@ -22,7 +22,10 @@ resource "azurerm_key_vault" "this" {
 
 # The Function App's managed identity can read secrets and resolve Key Vault references
 # (e.g. app settings of the form @Microsoft.KeyVault(SecretUri=...)).
+# Created only when the deploy identity is allowed to assign roles; otherwise an admin grants
+# "Key Vault Secrets User" to the Function App MI separately.
 resource "azurerm_role_assignment" "func_kv_secrets_user" {
+  count                = local.manage_role_assignments ? 1 : 0
   scope                = azurerm_key_vault.this.id
   role_definition_name = "Key Vault Secrets User"
   principal_id         = module.function_app.function_app_principal_id

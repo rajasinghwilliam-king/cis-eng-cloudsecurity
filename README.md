@@ -155,6 +155,31 @@ JSON `storage` block:
 
 Alternatively, set `deploy_package=false` to provision infra only and deploy the code from inside the network.
 
+## Role assignments (RBAC) — created separately by default
+
+The Function App accesses storage and Key Vault at runtime via its **managed identity**. The role
+assignments that grant that access require `Microsoft.Authorization/roleAssignments/write`, which a
+**deploy-only (Contributor) service principal cannot perform** (it's a privilege-escalation guard).
+
+By design this repo therefore **does not** create those role assignments (`manage_role_assignments`
+defaults to `false`). After deploying, an admin grants them to the Function App MI separately:
+
+```bash
+# principalId = terraform output function_app_principal_id
+az role assignment create --assignee-object-id <MI_PRINCIPAL_ID> --assignee-principal-type ServicePrincipal \
+  --role "Storage Blob Data Reader" \
+  --scope /subscriptions/<sub>/resourceGroups/rg-ciseng-dev-uks-001/providers/Microsoft.Storage/storageAccounts/stcisengdevuks001
+
+az role assignment create --assignee-object-id <MI_PRINCIPAL_ID> --assignee-principal-type ServicePrincipal \
+  --role "Key Vault Secrets User" \
+  --scope /subscriptions/<sub>/resourceGroups/rg-ciseng-dev-uks-001/providers/Microsoft.KeyVault/vaults/kv-ciseng-dev-uks-001
+```
+
+Run-from-package uses the MI to read the blob, so the app only starts successfully **after** the
+Storage Blob Data Reader grant — grant it, then restart the Function App. If your deploy identity
+*does* hold Role Based Access Control Administrator / User Access Administrator, set
+`"manage_role_assignments": true` in the environment JSON and Terraform will create them instead.
+
 ## Notes
 
 - Plan SKU must support private networking: Elastic Premium (`EP1`+) or Premium v3 (`P1v3`+).

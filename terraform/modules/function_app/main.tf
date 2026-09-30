@@ -70,8 +70,10 @@ resource "azurerm_storage_blob" "package" {
 }
 
 # Let the Function App's managed identity read the package blob (SAS-less run-from-package).
+# Created only when the deploy identity is allowed to assign roles; otherwise an admin grants
+# "Storage Blob Data Reader" to the Function App MI separately.
 resource "azurerm_role_assignment" "package_reader" {
-  count                = var.deploy_package ? 1 : 0
+  count                = var.deploy_package && var.manage_role_assignments ? 1 : 0
   scope                = azurerm_storage_account.this.id
   role_definition_name = "Storage Blob Data Reader"
   principal_id         = local.function_app.identity[0].principal_id

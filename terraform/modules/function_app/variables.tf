@@ -103,6 +103,12 @@ variable "deploy_package" {
   default     = false
 }
 
+variable "manage_role_assignments" {
+  type        = bool
+  description = "When true, Terraform creates the role assignment granting the Function App MI Storage Blob Data Reader. Requires the deploy identity to have role-assignment rights."
+  default     = false
+}
+
 variable "package_path" {
   type        = string
   description = "Local path to the zipped deployment package. Required when deploy_package is true."

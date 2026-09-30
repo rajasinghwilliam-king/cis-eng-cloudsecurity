@@ -23,6 +23,12 @@ locals {
   storage_public_network_access = try(local.config.storage.public_network_access, false)
   storage_allowed_ip_rules      = try(local.config.storage.allowed_ip_rules, [])
 
+  # Whether Terraform (running as the deploy SP) creates the RBAC role assignments that grant the
+  # Function App's managed identity access to storage/Key Vault. Default false: a deploy-only
+  # (Contributor) SP cannot assign roles, so an admin creates these separately. Set true only if
+  # the deploy identity has Role Based Access Control Administrator / User Access Administrator.
+  manage_role_assignments = try(local.config.manage_role_assignments, false)
+
   key_vault_sku                   = try(local.config.key_vault.sku, "standard")
   key_vault_purge_protection      = try(local.config.key_vault.purge_protection_enabled, false)
   key_vault_soft_delete_retention = try(local.config.key_vault.soft_delete_retention_days, 7)
