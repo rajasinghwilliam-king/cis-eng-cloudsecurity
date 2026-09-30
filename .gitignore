@@ -1,0 +1,34 @@
+# Local .terraform directories
+**/.terraform/*
+
+# Terraform lockfile is committed; state files are NOT
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Exclude override files (local-only)
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# CLI configuration & plan output files
+.terraformrc
+terraform.rc
+*.tfplan
+
+# Sensitive var files (commit the *.tfvars that are safe; keep secrets out)
+*.auto.tfvars
+secrets.tfvars
+*.secret.tfvars
+
+# Terraform-built deployment packages
+**/.builds/
+*.zip
+
+# App build output (.NET / Node)
+publish/
+**/bin/
+**/obj/
+node_modules/

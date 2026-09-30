@@ -1,0 +1,98 @@
+name: Deploy
+
+# Single pipeline: reads variable/<env>.json, builds & zips src, and deploys everything
+# (infrastructure + app package) with Terraform. develop -> DEV, main -> PRD.
+on:
+  push:
+    branches: [develop, main]
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write # required for GitHub OIDC federation to Azure
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: "1.9.8"
+  DOTNET_VERSION: "8.0.x"
+
+jobs:
+  deploy:
+    name: deploy (${{ github.ref_name == 'main' && 'prd' || 'dev' }})
+    runs-on: ubuntu-latest
+    # Ties the run to the GitHub Environment protection rules (e.g. approvals on prd).
+    environment: ${{ github.ref_name == 'main' && 'prd' || 'dev' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve environment
+        id: env
+        shell: bash
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "name=prd" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Read references from variable/<env>.json
+        id: cfg
+        shell: bash
+        run: |
+          FILE="variable/${{ steps.env.outputs.name }}.json"
+          {
+            echo "client_id=$(jq -r '.service_principal.client_id' "$FILE")"
+            echo "tenant_id=$(jq -r '.service_principal.tenant_id' "$FILE")"
+            echo "subscription_id=$(jq -r '.subscription_id' "$FILE")"
+            echo "state_rg=$(jq -r '.state.resource_group_name' "$FILE")"
+            echo "state_sa=$(jq -r '.state.storage_account_name' "$FILE")"
+            echo "state_container=$(jq -r '.state.container_name' "$FILE")"
+            echo "state_key=$(jq -r '.state.key' "$FILE")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # Compiled runtime: publish to ./publish, which Terraform then zips and deploys.
+      # For a script-based runtime (PowerShell/Python/Node v3) drop this step and set
+      # package_source_dir back to ../src.
+      - name: Build & publish function app
+        shell: bash
+        run: dotnet publish src -c Release -o "${{ github.workspace }}/publish"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform init
+        working-directory: terraform
+        env:
+          ARM_USE_OIDC: "true"
+          ARM_CLIENT_ID: ${{ steps.cfg.outputs.client_id }}
+          ARM_TENANT_ID: ${{ steps.cfg.outputs.tenant_id }}
+          ARM_SUBSCRIPTION_ID: ${{ steps.cfg.outputs.subscription_id }}
+        run: |
+          terraform init -input=false \
+            -backend-config="resource_group_name=${{ steps.cfg.outputs.state_rg }}" \
+            -backend-config="storage_account_name=${{ steps.cfg.outputs.state_sa }}" \
+            -backend-config="container_name=${{ steps.cfg.outputs.state_container }}" \
+            -backend-config="key=${{ steps.cfg.outputs.state_key }}"
+
+      - name: Terraform apply
+        working-directory: terraform
+        env:
+          ARM_USE_OIDC: "true"
+          ARM_CLIENT_ID: ${{ steps.cfg.outputs.client_id }}
+          ARM_TENANT_ID: ${{ steps.cfg.outputs.tenant_id }}
+          ARM_SUBSCRIPTION_ID: ${{ steps.cfg.outputs.subscription_id }}
+        run: |
+          terraform apply -input=false -auto-approve \
+            -var="environment=${{ steps.env.outputs.name }}" \
+            -var="package_source_dir=${{ github.workspace }}/publish"

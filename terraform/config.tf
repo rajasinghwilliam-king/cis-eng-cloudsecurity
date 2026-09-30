@@ -1,0 +1,33 @@
+# Load the per-environment reference file (variable/<environment>.json) as the single
+# reusable source of truth for subscription, network, service principal, state and app settings.
+locals {
+  config = jsondecode(file("${path.module}/${var.variable_dir}/${var.environment}.json"))
+
+  # Normalized, defaulted views of the config used throughout the configuration.
+  subscription_id          = local.config.subscription_id
+  tenant_id                = local.config.tenant_id
+  workload                 = local.config.workload
+  environment              = local.config.environment
+  location                 = local.config.location
+  instance                 = try(local.config.instance, "001")
+  app_service_plan_sku     = try(local.config.app_service_plan_sku, "EP1")
+  os_type                  = try(local.config.os_type, "Windows")
+  always_on                = try(local.config.always_on, false)
+  zone_balancing_enabled   = try(local.config.zone_balancing_enabled, false)
+  functions_worker_runtime = try(local.config.functions_worker_runtime, "dotnet-isolated")
+  dotnet_version           = try(local.config.dotnet_version, "v8.0")
+  storage_replication_type = try(local.config.storage_replication_type, "LRS")
+
+  key_vault_sku                   = try(local.config.key_vault.sku, "standard")
+  key_vault_purge_protection      = try(local.config.key_vault.purge_protection_enabled, false)
+  key_vault_soft_delete_retention = try(local.config.key_vault.soft_delete_retention_days, 7)
+
+  network           = local.config.network
+  app_settings      = try(local.config.app_settings, {})
+  extra_tags        = try(local.config.tags, {})
+
+  # Drop empty private DNS zone entries so unset zones are simply skipped.
+  private_dns_zone_ids = {
+    for k, v in try(local.config.private_dns_zone_ids, {}) : k => v if v != null && v != ""
+  }
+}

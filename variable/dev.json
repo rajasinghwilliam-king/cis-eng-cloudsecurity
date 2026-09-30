@@ -1,0 +1,60 @@
+{
+  "subscription_id": "4eb240ed-b161-47c2-a4fd-d7f7a3cb1199",
+  "tenant_id": "987438a9-d4bc-4ec3-8a9b-04cdbe85f27f",
+
+  "workload": "ciseng",
+  "environment": "dev",
+  "location": "uksouth",
+  "instance": "001",
+
+  "app_service_plan_sku": "EP1",
+  "os_type": "Windows",
+  "always_on": false,
+  "zone_balancing_enabled": false,
+  "functions_worker_runtime": "dotnet-isolated",
+  "dotnet_version": "v8.0",
+  "storage_replication_type": "LRS",
+
+  "key_vault": {
+    "sku": "standard",
+    "purge_protection_enabled": false,
+    "soft_delete_retention_days": 7
+  },
+
+  "network": {
+    "virtual_network_name": "vnet-ciseng-dev-uks-001",
+    "virtual_network_resource_group": "rg-network-dev",
+    "integration_subnet_name": "snet-ciseng-dev-uks-func",
+    "private_endpoint_subnet_name": "snet-ciseng-dev-uks-pe"
+  },
+
+  "private_dns_zone_ids": {
+    "sites": "",
+    "blob": "",
+    "file": "",
+    "queue": "",
+    "table": "",
+    "vault": ""
+  },
+
+  "service_principal": {
+    "client_id": "23c9df71-d536-4901-b6ca-751015797575",
+    "tenant_id": "987438a9-d4bc-4ec3-8a9b-04cdbe85f27f"
+  },
+
+  "state": {
+    "resource_group_name": "rg-tfstate-dev",
+    "storage_account_name": "sttfstatecisengdev",
+    "container_name": "tfstate",
+    "key": "cis-eng-functionapps/dev.terraform.tfstate"
+  },
+
+  "app_settings": {
+    "APP_ENV": "dev"
+  },
+
+  "tags": {
+    "cost_center": "CIS",
+    "owner": "UST"
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "subscription_id": "00000000-0000-0000-0000-000000000000",
+  "tenant_id": "00000000-0000-0000-0000-000000000000",
+
+  "workload": "ciseng",
+  "environment": "prd",
+  "location": "eastus",
+  "instance": "001",
+
+  "app_service_plan_sku": "EP2",
+  "os_type": "Windows",
+  "always_on": false,
+  "zone_balancing_enabled": true,
+  "functions_worker_runtime": "dotnet-isolated",
+  "dotnet_version": "v8.0",
+  "storage_replication_type": "ZRS",
+
+  "key_vault": {
+    "sku": "standard",
+    "purge_protection_enabled": true,
+    "soft_delete_retention_days": 90
+  },
+
+  "network": {
+    "virtual_network_name": "vnet-prd",
+    "virtual_network_resource_group": "rg-network-prd",
+    "integration_subnet_name": "snet-func-integration",
+    "private_endpoint_subnet_name": "snet-privateendpoints"
+  },
+
+  "private_dns_zone_ids": {
+    "sites": "",
+    "blob": "",
+    "file": "",
+    "queue": "",
+    "table": "",
+    "vault": ""
+  },
+
+  "service_principal": {
+    "client_id": "00000000-0000-0000-0000-000000000000",
+    "tenant_id": "00000000-0000-0000-0000-000000000000"
+  },
+
+  "state": {
+    "resource_group_name": "rg-tfstate-prd",
+    "storage_account_name": "sttfstatecisengprd",
+    "container_name": "tfstate",
+    "key": "cis-eng-functionapps/prd.terraform.tfstate"
+  },
+
+  "app_settings": {
+    "APP_ENV": "prd"
+  },
+
+  "tags": {
+    "cost_center": "TODO",
+    "owner": "TODO"
+  }
+}
