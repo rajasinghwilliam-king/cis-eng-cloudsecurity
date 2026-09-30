@@ -37,9 +37,12 @@ locals {
   app_settings      = try(local.config.app_settings, {})
   extra_tags        = try(local.config.tags, {})
 
-  # When true, Terraform creates and VNet-links the private DNS zones itself. When false,
-  # it uses the zone IDs supplied in private_dns_zone_ids (e.g. centrally-managed zones).
-  create_private_dns_zones = try(local.config.create_private_dns_zones, false)
+  # Private DNS zone resolution, in priority order:
+  #  1. create_private_dns_zones = true  -> Terraform creates + VNet-links the zones (greenfield tenant).
+  #  2. private_dns_zone_resource_group set -> look up EXISTING central zones by name (no create/link).
+  #  3. else -> use the explicit IDs in private_dns_zone_ids.
+  create_private_dns_zones        = try(local.config.create_private_dns_zones, false)
+  private_dns_zone_resource_group = try(local.config.private_dns_zone_resource_group, null)
 
   # Drop empty private DNS zone entries so unset zones are simply skipped.
   private_dns_zone_ids = {
