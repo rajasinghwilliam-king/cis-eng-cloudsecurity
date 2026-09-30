@@ -103,6 +103,12 @@ variable "package_hash" {
   default     = null
 }
 
+variable "deploy_agent_ip" {
+  type        = string
+  description = "Public IP of the deploy agent/runner to temporarily allow on the storage account for the package upload. Null/empty keeps the account fully private (private endpoints only)."
+  default     = null
+}
+
 variable "tags" {
   type        = map(string)
   description = "Tags applied to all resources in this module."

@@ -60,9 +60,10 @@ module "function_app" {
   application_insights_connection_string = azurerm_application_insights.this.connection_string
 
   # Code deployment (zip -> run-from-package)
-  deploy_package = var.deploy_package
-  package_path   = var.deploy_package ? data.archive_file.package[0].output_path : null
-  package_hash   = var.deploy_package ? data.archive_file.package[0].output_md5 : null
+  deploy_package  = var.deploy_package
+  package_path    = var.deploy_package ? data.archive_file.package[0].output_path : null
+  package_hash    = var.deploy_package ? data.archive_file.package[0].output_md5 : null
+  deploy_agent_ip = var.deploy_agent_ip
 
   tags = local.common_tags
 }

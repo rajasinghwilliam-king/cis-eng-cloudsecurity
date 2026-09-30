@@ -16,6 +16,12 @@ resource "azurerm_service_plan" "this" {
 # Storage account (Function App backing store) - fully private
 ########################################
 
+locals {
+  # When a deploy-agent IP is supplied (CI package upload), the public endpoint is turned on
+  # but locked to that single IP. Otherwise the account stays fully private (private endpoints only).
+  deploy_ip_allowed = var.deploy_agent_ip != null && var.deploy_agent_ip != ""
+}
+
 resource "azurerm_storage_account" "this" {
   name                            = var.storage_account_name
   resource_group_name             = var.resource_group_name
@@ -25,7 +31,7 @@ resource "azurerm_storage_account" "this" {
   account_kind                    = "StorageV2"
   min_tls_version                 = "TLS1_2"
   https_traffic_only_enabled      = true
-  public_network_access_enabled   = false
+  public_network_access_enabled   = local.deploy_ip_allowed
   allow_nested_items_to_be_public = false
   shared_access_key_enabled       = true
   tags                            = var.tags
@@ -33,6 +39,7 @@ resource "azurerm_storage_account" "this" {
   network_rules {
     default_action = "Deny"
     bypass         = ["AzureServices"]
+    ip_rules       = local.deploy_ip_allowed ? [var.deploy_agent_ip] : []
   }
 }
 
@@ -55,7 +62,7 @@ resource "azurerm_storage_blob" "package" {
   count = var.deploy_package ? 1 : 0
   # Hash in the name makes the run-from-package URL change on new content, forcing a reload.
   name                   = "package-${var.package_hash}.zip"
-  storage_account_name   = azurerm_storage_account.this.name
+  storage_account_id     = azurerm_storage_account.this.id
   storage_container_name = azurerm_storage_container.deployments[0].name
   type                   = "Block"
   source                 = var.package_path
