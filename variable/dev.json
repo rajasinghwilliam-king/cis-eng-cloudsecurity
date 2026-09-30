@@ -34,12 +34,12 @@
   },
 
   "private_dns_zone_ids": {
-    "sites": "",
-    "blob": "",
-    "file": "",
-    "queue": "",
-    "table": "",
-    "vault": ""
+    "sites": "/subscriptions/4eb240ed-b161-47c2-a4fd-d7f7a3cb1199/resourceGroups/rg-network-dev/providers/Microsoft.Network/privateDnsZones/privatelink.azurewebsites.net",
+    "blob": "/subscriptions/4eb240ed-b161-47c2-a4fd-d7f7a3cb1199/resourceGroups/rg-network-dev/providers/Microsoft.Network/privateDnsZones/privatelink.blob.core.windows.net",
+    "file": "/subscriptions/4eb240ed-b161-47c2-a4fd-d7f7a3cb1199/resourceGroups/rg-network-dev/providers/Microsoft.Network/privateDnsZones/privatelink.file.core.windows.net",
+    "queue": "/subscriptions/4eb240ed-b161-47c2-a4fd-d7f7a3cb1199/resourceGroups/rg-network-dev/providers/Microsoft.Network/privateDnsZones/privatelink.queue.core.windows.net",
+    "table": "/subscriptions/4eb240ed-b161-47c2-a4fd-d7f7a3cb1199/resourceGroups/rg-network-dev/providers/Microsoft.Network/privateDnsZones/privatelink.table.core.windows.net",
+    "vault": "/subscriptions/4eb240ed-b161-47c2-a4fd-d7f7a3cb1199/resourceGroups/rg-network-dev/providers/Microsoft.Network/privateDnsZones/privatelink.vaultcore.azure.net"
   },
 
   "service_principal": {
