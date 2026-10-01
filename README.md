@@ -96,11 +96,28 @@ subscriptionIds) plus the CIS audit tool's `cisLevel` (`--level`) and `suppressi
 [docs/zero-trust-assessment-parameters.md](docs/zero-trust-assessment-parameters.md) and
 [docs/cis-azure-benchmark-parameters.md](docs/cis-azure-benchmark-parameters.md).
 
+**Assessment history.** Every run is filed under a **client** and **environment** (`clientName`,
+`environmentName` in the request). On completion the orchestration writes the full result as a JSON
+blob to the `assessments` container of the app's storage account (connection `AssessmentHistoryStorage`
+if set, otherwise `AzureWebJobsStorage`; locally that is Azurite). The summary (score, counts,
+frameworks, tenant) lives in blob metadata, so the history list never downloads findings. The web
+app's Overview lists this history per client environment with the change against the previous run;
+selecting a run opens its analytics and pillar findings.
+
 **Endpoints**
 - `GET /api/ui` — the web app.
 - `GET /api/catalog` — vocabulary + the full check catalog (the page renders this before any run).
 - `POST /api/assessments` — validate and start an assessment; returns `{ id, checks, statusQueryGetUri }`.
 - `GET /api/assessments/{instanceId}` — `{ runtimeStatus, customStatus, result }` in camelCase.
+- `GET /api/history[?client=]` — saved assessment summaries, newest first.
+- `GET /api/history/{id}` — the full saved result for one assessment.
+
+**Run locally**
+```bash
+npx azurite --silent --location .azurite      # storage emulator (Durable + history blobs)
+cd src && func start                          # Azure Functions Core Tools 4.x, .NET 10 SDK on PATH
+# open http://localhost:7071/api/ui
+```
 
 > **Credentials:** the target service-principal secret is used only to connect for the assessment.
 > Use a least-privilege (read-only) principal and store secrets in Key Vault in production — never log them.

@@ -53,7 +53,9 @@
     .mono { font-family: var(--font-mono); font-weight: 500; font-variant-numeric: tabular-nums; }
     .muted { color: var(--ink-soft); }
     .mute2 { color: var(--ink-mute); }
-    .container { max-width: 1152px; margin: 0 auto; padding: 0 24px; }
+    .container { width: 100%; margin: 0 auto; padding: 0 40px; }   /* fluid: fills wide monitors */
+    @media (max-width: 900px) { .container { padding: 0 20px; } }
+    .viz svg { max-width: 900px; }                                   /* charts stay readable when cards get wide */
     .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
     /* ---------- header ---------- */
@@ -144,7 +146,14 @@
     .bars .n { font-family: var(--font-mono); font-size: 13px; text-align: right; }
 
     /* ---------- form ---------- */
-    .form { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; align-items: start; }
+    .form { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 20px; align-items: start; }
+    .hist td.client { font-weight: 600; white-space: nowrap; }
+    .hist .score { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+    .hist .score .track { width: 90px; }
+    .hist .delta { font-size: 12px; color: var(--ink-soft); }
+    .hist .delta.up { color: var(--ok); } .hist .delta.down { color: var(--fail); }
+    .crumbs { font-size: 13px; color: var(--ink-soft); margin-bottom: 14px; }
+    .crumbs a { color: var(--accent); }
     @media (max-width: 900px) { .form { grid-template-columns: 1fr; } }
     fieldset { border: 0; padding: 0; margin: 0 0 22px; }
     legend { font-family: var(--font-display); font-weight: 700; font-size: 14px; letter-spacing: .02em; text-transform: uppercase; color: var(--ink); padding: 0; margin-bottom: 4px; }
@@ -355,7 +364,9 @@ const COLS = [
 
 const state = {
   catalog: null,       // GET /api/catalog
-  report: null,        // completed AssessmentResult (camelCase)
+  history: [],         // GET /api/history (summaries per client environment)
+  report: null,        // the selected AssessmentResult (camelCase)
+  reportId: null,
   run: null,           // { id, checks, status, total }
   error: null,
   tables: {},          // per-pillar filter state
@@ -466,16 +477,19 @@ document.addEventListener("pointerleave", () => { tip.style.display = "none"; })
    Header: nav + tenant dropdown
    ============================================================================ */
 function renderNav(active) {
-  const items = [["", "Overview"], ...PILLARS.map(p => [p.toLowerCase(), p])];
-  $("#nav").innerHTML = items.map(([to, t]) => `<a href="#/${to}" class="${active === to ? "active" : ""}">${t}</a>`).join("");
+  const items = [["", "Overview"]];
+  if (state.report) items.push([`assessment/${state.reportId}`, "Analytics"]);
+  items.push(...PILLARS.map(p => [p.toLowerCase(), p]));
+  $("#nav").innerHTML = items.map(([to, t]) => `<a href="#/${to}" class="${active === to.toLowerCase() ? "active" : ""}">${t}</a>`).join("");
 }
 
 function renderTenant() {
   const r = state.report;
-  const label = r ? (r.tenantName || r.domain || (r.tenantId ? "Tenant " + String(r.tenantId).slice(0, 8) : "Assessment")) : "No assessment yet";
+  const label = r ? `${r.clientName || "Assessment"} / ${r.environmentName || ""}` : "No assessment selected";
   $("#tenantBtn").textContent = label;
-  $("#tenantBtn").title = r ? `Tenant ${r.tenantId || ""}` : "Run an assessment to see tenant details";
+  $("#tenantBtn").title = r ? `Tenant ${r.tenantId || ""}` : "Select an assessment from the Overview";
   $("#tenantMenu").innerHTML = r ? `
+    <div class="row"><span class="k">Client / environment</span><span class="v">${esc(r.clientName || "")} <span class="mute2">${esc(r.environmentName || "")}</span></span></div>
     <div class="row"><span class="k">Tenant</span><span class="v">${esc(r.tenantName || "Not available")} <span class="mute2">${esc(r.domain || "")}</span></span></div>
     <div class="row"><span class="k">Tenant ID</span><span class="v mono">${esc(r.tenantId || "Not available")}</span></div>
     <hr/>
@@ -483,10 +497,23 @@ function renderTenant() {
     <div class="row"><span class="k">Run on</span><span class="v">${esc(fmtDate(r.executedAt))}</span></div>
     <div class="row"><span class="k">Frameworks</span><span class="v">${esc(arr(r.frameworks).join(", "))}</span></div>
     <div class="row"><span class="k">Version</span><span class="v mono">${esc(r.currentVersion || "")}</span></div>`
-    : `<div class="row"><span class="k">Nothing to show</span><span class="v">Run an assessment to see tenant details here.</span></div>`;
+    : `<div class="row"><span class="k">Nothing selected</span><span class="v">Pick an assessment from the history on the Overview page.</span></div>`;
   $("#footMeta").innerHTML = r
-    ? `<li>Run on ${esc(fmtDate(r.executedAt))}</li><li>Tenant ${esc(r.tenantId)}</li><li>${arr(r.tests).length} tests, ${arr(r.frameworks).length} framework(s)</li>`
-    : `<li>No assessment has been run in this session.</li>`;
+    ? `<li>${esc(r.clientName || "")} / ${esc(r.environmentName || "")}</li><li>Run on ${esc(fmtDate(r.executedAt))}</li><li>Tenant ${esc(r.tenantId)}</li><li>${arr(r.tests).length} tests, ${arr(r.frameworks).length} framework(s)</li>`
+    : `<li>${state.history.length} assessment(s) in history.</li>`;
+}
+
+async function loadHistory() {
+  try { const res = await fetch("/api/history"); if (res.ok) state.history = normalize(await res.json()); } catch { /* keep what we have */ }
+}
+
+async function selectAssessment(id) {
+  if (state.reportId === id && state.report) return true;
+  const res = await fetch(`/api/history/${encodeURIComponent(id)}`);
+  if (!res.ok) return false;
+  state.report = normalize(await res.json()); state.reportId = id; state.tables = {};
+  renderTenant();
+  return true;
 }
 $("#tenantBtn").addEventListener("click", e => { e.stopPropagation(); $("#tenantDd").classList.toggle("open"); });
 document.addEventListener("click", () => document.querySelectorAll(".dropdown.open").forEach(d => d.classList.remove("open")));
@@ -502,6 +529,13 @@ function route() {
   const main = $("#main");
   if (!state.catalog) { main.innerHTML = `<div class="card"><div class="progress"><span class="spinner"></span><span>Loading catalog</span></div></div>`; return; }
   if (h === "new") return renderForm(main);
+  if (h.startsWith("assessment/")) {
+    const id = raw.slice("assessment/".length).split("?")[0];
+    if (state.reportId === id && state.report) return renderAssessment(main, state.report);
+    main.innerHTML = `<div class="card"><div class="progress"><span class="spinner"></span><span>Loading assessment</span></div></div>`;
+    selectAssessment(id).then(ok => { if (!ok) { state.error = "That assessment is no longer in the history."; location.hash = "#/"; } else route(); });
+    return;
+  }
   const pillar = PILLARS.find(p => p.toLowerCase() === h);
   if (pillar) {
     // Deep link from the Overview heatmap: #/identity?risk=High opens the failed tests at that risk.
@@ -516,38 +550,90 @@ window.addEventListener("hashchange", route);
 /* ============================================================================
    Overview
    ============================================================================ */
+/* Overview: what has been assessed, for whom, and what the catalog covers. */
 function renderOverview(main) {
-  const r = state.report;
   const cat = state.catalog;
+  const hist = state.history;
+  const clients = [...new Set(hist.map(h => h.clientName))];
+  const envKey = h => `${h.clientName} / ${h.environmentName}`;
+  // Latest run per client environment, with the delta against the previous run of the same environment.
+  const latest = {};
+  [...hist].sort((a, b) => new Date(a.executedAt) - new Date(b.executedAt)).forEach(h => {
+    const k = envKey(h); const prev = latest[k];
+    latest[k] = { ...h, delta: prev ? h.score - prev.score : null };
+  });
+  const latestList = Object.values(latest).sort((a, b) => a.score - b.score);
+  const avg = latestList.length ? Math.round(latestList.reduce((s, h) => s + h.score, 0) / latestList.length) : null;
+  const byPillar = PILLARS.map(p => [p, cat.checks.filter(c => arr(c.testPillar).includes(p)).length]);
+  const fwRows = cat.frameworks.map(f => {
+    const checks = cat.checks.filter(c => c.framework === f.key);
+    return { ...f, checks: checks.length, pillars: [...new Set(checks.flatMap(c => arr(c.testPillar)))], categories: new Set(checks.map(c => c.testCategory)).size };
+  });
+  const deltaHtml = d => d == null ? `<span class="delta">first run</span>` : `<span class="delta ${d > 0 ? "up" : d < 0 ? "down" : ""}">${d > 0 ? "+" : ""}${d} pts vs previous</span>`;
 
-  if (state.run && !r) {
-    main.innerHTML = pageHead("Overview", "Assessment in progress") + progressCard();
-    return;
-  }
+  main.innerHTML = pageHead("Overview", "Assessments run per client environment. Select one to open its analytics and findings.") + `
+    <div class="stack">
+      ${state.error ? `<div class="error">${esc(state.error)}</div>` : ""}
+      ${state.run ? progressCard() : ""}
 
-  if (!r) {
-    const byPillar = PILLARS.map(p => [p, cat.checks.filter(c => arr(c.testPillar).includes(p)).length]);
-    const max = Math.max(...byPillar.map(x => x[1]), 1);
-    main.innerHTML = pageHead("Overview", "No assessment has been run yet. The catalog below is what a full run covers.") + `
-      <div class="stack">
-        ${state.error ? `<div class="error">${esc(state.error)}</div>` : ""}
-        <div class="card">
-          <div class="hd"><h2>Check catalog</h2><a class="btn primary sm" href="#/new">New assessment</a>
-            <div class="desc">${cat.checks.length} checks across ${cat.frameworks.length} frameworks. ${cat.checks.filter(c => c.framework === "zero-trust").length} come from the Microsoft Zero Trust Assessment; the rest are UST ISO 27001 and CIS checks.</div></div>
-          <div class="bd">
-            <div class="bars">
-              ${byPillar.map(([p, n]) => `<span class="l">${p}</span><span class="b"><i style="width:${(n / max) * 100}%"></i></span><span class="n">${n}</span>`).join("")}
-            </div>
-          </div>
-        </div>
-        <div class="card"><div class="hd"><h2>Frameworks</h2></div><div class="bd">
-          <table><thead><tr><th>Framework</th><th>Source</th><th style="text-align:right">Checks</th></tr></thead><tbody>
-          ${cat.frameworks.map(f => `<tr style="cursor:default"><td>${esc(f.name)}</td><td class="muted">${esc(f.source)}</td><td class="mono" style="text-align:right">${cat.checks.filter(c => c.framework === f.key).length}</td></tr>`).join("")}
-          </tbody></table></div></div>
-      </div>`;
-    return;
-  }
+      <div class="grid g4">
+        <div class="card tile"><h3>${ICON.building} Clients</h3><div class="pair"><div><div class="lab">Client organisations</div><div class="num">${clients.length}</div></div><div><div class="lab">Environments</div><div class="num">${latestList.length}</div></div></div></div>
+        <div class="card tile"><h3>${ICON.shield} Assessments</h3><div class="pair"><div><div class="lab">Runs in history</div><div class="num">${hist.length}</div></div><div><div class="lab">Last run</div><div class="num" style="font-size:14px;font-family:var(--font-sans)">${hist[0] ? esc(fmtDate(hist[0].executedAt)) : "none yet"}</div></div></div></div>
+        <div class="card tile"><h3>${ICON.group} Average score</h3><div class="pair"><div><div class="lab">Latest run per environment</div>${avg == null ? `<div class="num na">No runs yet</div>` : `<div class="num">${avg}%</div>`}</div><div><div class="lab">Lowest</div>${latestList[0] ? `<div class="num">${latestList[0].score}%</div>` : `<div class="num na">n/a</div>`}</div></div></div>
+        <div class="card tile"><h3>${ICON.device} Catalog</h3><div class="pair"><div><div class="lab">Frameworks</div><div class="num">${cat.frameworks.length}</div></div><div><div class="lab">Checks</div><div class="num">${cat.checks.length}</div></div></div></div>
+      </div>
 
+      <div class="card hist">
+        <div class="hd"><h2>Assessment history</h2><input class="in" id="histQ" placeholder="Filter by client, environment or tenant" style="width:300px;padding:7px 10px;font-size:14px" />
+          <div class="desc">Every completed run, newest first, filed under its client and environment. Click a row to open the analytics and findings for that run.</div></div>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>Client</th><th>Environment</th><th>Tenant</th><th>Frameworks</th><th>Run on</th><th style="text-align:right">Tests</th><th>Score</th><th style="text-align:right">Failed</th></tr></thead>
+          <tbody id="histRows"></tbody>
+        </table></div>
+      </div>
+
+      <div class="viz-grid">
+        ${latestList.length ? vizCard("Latest score by client environment", "Lowest first. Change is against the previous run of the same environment.",
+          hbars(latestList.map(h => ({ label: envKey(h), value: h.score, display: `${h.score}%${h.delta == null ? "" : ` (${h.delta > 0 ? "+" : ""}${h.delta})`}`, href: `#/assessment/${h.id}`, tip: [envKey(h), `Score: ${h.score}%`, `Passed: ${h.passed} of ${h.executed}`, `Run on: ${fmtDate(h.executedAt)}`] })), { max: 100, label: "Latest score by client environment" }),
+          dataTable(["Client environment", "Score", "Passed / executed", "Run on"], latestList.map(h => [envKey(h), `${h.score}%`, `${h.passed} / ${h.executed}`, fmtDate(h.executedAt)]))) : ""}
+        ${vizCard("Catalog coverage by pillar", `${cat.checks.length} checks across ${cat.frameworks.length} frameworks. A test can belong to more than one pillar.`,
+          hbars(byPillar.map(([p, n]) => ({ label: p, value: n, display: String(n), href: `#/${p.toLowerCase()}`, tip: [p, `Checks: ${n}`] })), { labelW: 120, label: "Catalog coverage by pillar" }),
+          dataTable(["Pillar", "Checks"], byPillar))}
+      </div>
+
+      <div class="card">
+        <div class="hd"><h2>Frameworks and categories</h2><div class="desc">What each framework contributes to a run. Categories are the framework's own grouping (Zero Trust categories, CIS sections).</div></div>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>Framework</th><th>Source</th><th style="text-align:right">Checks</th><th style="text-align:right">Categories</th><th>Pillars covered</th></tr></thead>
+          <tbody>${fwRows.map(f => `<tr style="cursor:default"><td style="font-weight:600">${esc(f.name)}</td><td class="muted">${esc(f.source)}</td><td class="mono" style="text-align:right">${f.checks}</td><td class="mono" style="text-align:right">${f.categories}</td><td>${f.pillars.map(p => `<a class="pill" href="#/${p.toLowerCase()}">${esc(p)}</a>`).join("")}</td></tr>`).join("")}</tbody>
+        </table></div>
+      </div>
+    </div>`;
+
+  const renderRows = q => {
+    const rows = hist.filter(h => !q || [h.clientName, h.environmentName, h.tenantId, h.tenantName].join(" ").toLowerCase().includes(q));
+    const prevOf = h => { const same = hist.filter(x => envKey(x) === envKey(h) && new Date(x.executedAt) < new Date(h.executedAt)); return same.sort((a, b) => new Date(b.executedAt) - new Date(a.executedAt))[0]; };
+    $("#histRows").innerHTML = rows.length ? rows.map(h => { const prev = prevOf(h); return `
+      <tr data-id="${esc(h.id)}">
+        <td class="client">${esc(h.clientName)}</td><td>${esc(h.environmentName)}</td>
+        <td class="mono" style="font-size:12.5px">${esc(h.tenantName || h.tenantId)}</td>
+        <td>${arr(h.frameworks).map(f => `<span class="pill">${esc(fwShort(f))}</span>`).join("")}</td>
+        <td style="white-space:nowrap">${esc(fmtDate(h.executedAt))}</td>
+        <td class="mono" style="text-align:right">${h.tests}</td>
+        <td><div class="score"><div class="track"><i style="width:${h.score}%"></i></div><span class="mono">${h.score}%</span>${deltaHtml(prev ? h.score - prev.score : null)}</div></td>
+        <td class="mono" style="text-align:right">${h.failed}</td>
+      </tr>`; }).join("")
+      : `<tr><td colspan="8" class="empty">${hist.length ? "No assessments match the filter." : `No assessments yet. <a href="#/new">Run the first one</a>.`}</td></tr>`;
+    $("#histRows").querySelectorAll("tr[data-id]").forEach(tr => tr.addEventListener("click", () => { location.hash = `#/assessment/${tr.dataset.id}`; }));
+  };
+  renderRows("");
+  $("#histQ").addEventListener("input", e => renderRows(e.target.value.trim().toLowerCase()));
+  wireViz(main);
+}
+const fwShort = k => ({ "zero-trust": "Zero Trust", "iso-27001": "ISO 27001", "cis-azure": "CIS Azure", "cis-aws": "CIS AWS" })[k] || k;
+
+/* Assessment analytics: one completed run, its frameworks, scores and findings. */
+function renderAssessment(main, r) {
   const tests = arr(r.tests);
   const ti = r.tenantInfo || {};
   const P = VIZ();
@@ -611,7 +697,8 @@ function renderOverview(main) {
     return { label: sec, values };
   });
 
-  main.innerHTML = pageHead("Overview", `${totalFailed} failed finding${totalFailed === 1 ? "" : "s"} to fix, ${quickWins} of them quick wins. ${tests.length} tests run on ${esc(fmtDate(r.executedAt))}.`,
+  main.innerHTML = `<div class="crumbs"><a href="#/">Overview</a> / ${esc(r.clientName || "Assessment")} / ${esc(r.environmentName || "")}</div>` +
+    pageHead(`${r.clientName || "Assessment"}: ${r.environmentName || ""}`, `${totalFailed} failed finding${totalFailed === 1 ? "" : "s"} to fix, ${quickWins} of them quick wins. ${tests.length} tests across ${arr(r.frameworks).map(fwShort).join(", ")}, run on ${esc(fmtDate(r.executedAt))}.`,
     `<button class="btn sm" id="dlBtn">Download JSON</button>`) + `
     <div class="stack">
       <div class="card strip">
@@ -620,6 +707,7 @@ function renderOverview(main) {
         <span class="kv"><span class="k">Tenant ID</span><span class="v mono" style="font-weight:500;font-size:13px">${esc(r.tenantId || "Not available")}</span></span>
         <span class="kv"><span class="k">Primary domain</span><span class="v">${esc(r.domain || "Not available")}</span></span>
         <span class="kv"><span class="k">Tenant type</span><span class="v">${esc(r.tenantType || "Workforce")}</span></span>
+        <span class="kv"><span class="k">Frameworks</span><span class="v">${arr(r.frameworks).map(f => `<span class="pill">${esc(fwShort(f))}</span>`).join("")}</span></span>
       </div>
 
       <div class="grid g4">
@@ -895,7 +983,7 @@ function renderPillar(main, pillar) {
   main.innerHTML = pageHead(pillar, live ? `${all.filter(t => t.testStatus === "Failed").length} failed of ${all.filter(t => !EXCLUDED.includes(t.testStatus)).length} executed tests in this pillar.` : `${all.length} checks in the catalog for this pillar.`) + `
     <div class="card">
       <div class="hd"><h2>Assessment results</h2>
-        <div class="desc">${live ? "Results are based on the security principles in the <a href=\"https://learn.microsoft.com/entra/fundamentals/configure-security\" target=\"_blank\" rel=\"noreferrer\">Configuring Microsoft Entra for increased security</a> guide and the UST ISO 27001 / CIS catalogs." : "Showing the check catalog. <a href=\"#/new\">Run an assessment</a> to replace this with live results."}</div>
+        <div class="desc">${live ? `Findings for ${esc(state.report.clientName || "")} / ${esc(state.report.environmentName || "")}, run on ${esc(fmtDate(state.report.executedAt))}. <a href="#/assessment/${esc(state.reportId)}">Open the analytics</a> or <a href="#/">choose another assessment</a>.` : `Showing the check catalog. ${state.history.length ? 'Select an assessment from the <a href="#/">Overview</a> to see its findings, or ' : ""}<a href="#/new">run a new assessment</a>.`}</div>
       </div>
       <div class="toolbar">
         <input class="in" id="q" placeholder="Search by name, category or ID" value="${esc(ts.q)}" />
@@ -1007,6 +1095,15 @@ function renderForm(main) {
   main.innerHTML = pageHead("New assessment", "Connect to the target tenant with a read-only identity and choose what to check.") + `
     <form class="form" id="f" autocomplete="off">
       <div class="card"><div class="bd">
+        <fieldset>
+          <legend>Client</legend>
+          <div class="hint">History is kept per client environment, so the run is filed where you can find it again and compare with the previous run.</div>
+          <div class="two">
+            <div><label class="f" for="clientName">Client / customer name</label><input class="in" id="clientName" name="clientName" placeholder="Contoso Ltd" value="${esc(v("clientName"))}" required /></div>
+            <div><label class="f" for="environmentName">Environment</label><input class="in" id="environmentName" name="environmentName" placeholder="Production" value="${esc(v("environmentName", "Production"))}" list="envList" /><datalist id="envList"><option>Production</option><option>Pre-production</option><option>Development</option><option>Test</option></datalist></div>
+          </div>
+        </fieldset>
+
         <fieldset>
           <legend>Target tenant</legend>
           <div class="hint">Connect-ZtAssessment parameters.</div>
@@ -1120,6 +1217,8 @@ function renderForm(main) {
     const fd = new FormData(form);
     const list = n => fd.getAll(n);
     return {
+      clientName: (fd.get("clientName") || "").trim(),
+      environmentName: (fd.get("environmentName") || "").trim() || "Production",
       tenantId: (fd.get("tenantId") || "").trim(),
       environment: fd.get("environment"),
       tenantType: fd.get("tenantType") || "Workforce",
@@ -1208,8 +1307,13 @@ async function poll(id) {
       state.run.total = j.customStatus?.total ?? state.run.total;
       if (j.runtimeStatus === "Completed") {
         state.report = normalize(j.result || {});
+        state.reportId = state.report.instanceId || id;
+        state.tables = {};
         state.run = null;
-        renderTenant(); route();
+        await loadHistory();
+        renderTenant();
+        location.hash = `#/assessment/${state.reportId}`;
+        route();
         return;
       }
       if (["Failed", "Terminated", "Canceled"].includes(j.runtimeStatus)) { state.error = `Assessment ${j.runtimeStatus}.`; state.run = null; route(); return; }
@@ -1227,9 +1331,10 @@ async function poll(id) {
   $("#logo").src = LOGO; $("#logoFoot").src = LOGO;
   applyTheme(); renderTenant(); route();
   try {
-    const r = await fetch("/api/catalog");
+    const [r] = await Promise.all([fetch("/api/catalog"), loadHistory()]);
     state.catalog = await r.json();
     $("#footVer").textContent = `Cloud Security Assessment v${state.catalog.version || ""}`;
+    renderTenant();
   } catch (err) {
     $("#main").innerHTML = `<div class="error">Could not load the check catalog: ${esc(err.message)}</div>`;
     return;

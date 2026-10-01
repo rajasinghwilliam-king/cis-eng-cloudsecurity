@@ -17,8 +17,12 @@
 
 using System.Net;
 using System.Reflection;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Azure;
+using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.DurableTask;
@@ -145,6 +149,10 @@ public static class Vocabulary
 // Everything the web page submits. Property names mirror the PowerShell parameters.
 public sealed class AssessmentRequest
 {
+    // --- Who the assessment is for (history is kept per client and environment) ---
+    public string ClientName { get; set; } = string.Empty;               // customer / client, required
+    public string EnvironmentName { get; set; } = "Production";          // client environment label (Production, Dev, ...)
+
     // --- Connect-ZtAssessment ---
     public string TenantId { get; set; } = string.Empty;                 // -TenantId (alias -Tenant)
     public string Environment { get; set; } = "Global";                  // -Environment
@@ -183,6 +191,9 @@ public sealed class AssessmentRequest
     // Returns null when valid, otherwise a message for the caller.
     public string? Validate()
     {
+        if (string.IsNullOrWhiteSpace(ClientName)) return "clientName is required so the assessment is filed under the right client.";
+        if (ClientName.Length > 80) return "clientName must be 80 characters or fewer.";
+        if (string.IsNullOrWhiteSpace(EnvironmentName)) EnvironmentName = "Production";
         if (Frameworks.Count == 0) return "Select at least one framework.";
         bool needsTenant = Frameworks.Any(f => !f.Equals("cis-aws", StringComparison.OrdinalIgnoreCase));
         if (needsTenant && string.IsNullOrWhiteSpace(TenantId)) return "tenantId is required.";
@@ -308,6 +319,9 @@ public sealed class TenantOverview
 
 public sealed class AssessmentResult
 {
+    public string InstanceId { get; set; } = string.Empty;
+    public string ClientName { get; set; } = string.Empty;
+    public string EnvironmentName { get; set; } = string.Empty;
     public DateTimeOffset ExecutedAt { get; set; }
     public string TenantId { get; set; } = string.Empty;
     public string? TenantName { get; set; }
@@ -325,6 +339,130 @@ public sealed class AssessmentResult
 
 // Input to the RunCheck activity.
 public sealed record CheckInput(AssessmentRequest Request, string CheckId);
+
+// One row of the assessment history (blob metadata, no findings).
+public sealed class AssessmentSummary
+{
+    public string Id { get; set; } = string.Empty;          // instance id
+    public string ClientName { get; set; } = string.Empty;
+    public string EnvironmentName { get; set; } = string.Empty;
+    public string TenantId { get; set; } = string.Empty;
+    public string? TenantName { get; set; }
+    public DateTimeOffset ExecutedAt { get; set; }
+    public List<string> Frameworks { get; set; } = new();
+    public List<string> Pillars { get; set; } = new();
+    public int Tests { get; set; }
+    public int Executed { get; set; }
+    public int Passed { get; set; }
+    public int Failed { get; set; }
+    public int Score { get; set; }                           // passed / executed, percent
+    public string Version { get; set; } = string.Empty;
+}
+
+// Persists completed assessments as JSON blobs: assessments/<client>/<timestamp>_<instanceId>.json.
+// The summary lives in blob metadata so the history list never downloads findings.
+public static class AssessmentStore
+{
+    private const string Container = "assessments";
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    private static BlobContainerClient? Client()
+    {
+        var cs = System.Environment.GetEnvironmentVariable("AssessmentHistoryStorage")
+                 ?? System.Environment.GetEnvironmentVariable("AzureWebJobsStorage");
+        return string.IsNullOrWhiteSpace(cs) ? null : new BlobContainerClient(cs, Container);
+    }
+
+    public static AssessmentSummary Summarize(AssessmentResult r)
+    {
+        var executed = r.Tests.Where(t => t.TestStatus is not (TestStatus.Skipped or TestStatus.Planned or TestStatus.Suppressed)).ToList();
+        int passed = executed.Count(t => t.TestStatus == TestStatus.Passed);
+        return new AssessmentSummary
+        {
+            Id = r.InstanceId, ClientName = r.ClientName, EnvironmentName = r.EnvironmentName, TenantId = r.TenantId, TenantName = r.TenantName,
+            ExecutedAt = r.ExecutedAt, Frameworks = r.Frameworks, Pillars = r.Pillars, Tests = r.Tests.Count, Executed = executed.Count,
+            Passed = passed, Failed = executed.Count(t => t.TestStatus == TestStatus.Failed),
+            Score = executed.Count == 0 ? 0 : (int)Math.Round(passed * 100.0 / executed.Count), Version = r.CurrentVersion,
+        };
+    }
+
+    private static string Slug(string s)
+    {
+        var sb = new StringBuilder();
+        foreach (var ch in s.Trim().ToLowerInvariant()) sb.Append(char.IsLetterOrDigit(ch) ? ch : '-');
+        var slug = sb.ToString().Trim('-');
+        return slug.Length == 0 ? "client" : slug;
+    }
+
+    // Blob metadata must be ASCII: values are URL-encoded on write and decoded on read.
+    private static string Enc(string? s) => Uri.EscapeDataString(s ?? string.Empty);
+    private static string Dec(string? s) => Uri.UnescapeDataString(s ?? string.Empty);
+    private static string Meta(IDictionary<string, string> m, string key) => m.TryGetValue(key, out var v) ? v : string.Empty;
+    private static int MetaInt(IDictionary<string, string> m, string key) => int.TryParse(Meta(m, key), out var v) ? v : 0;
+    private static readonly GetBlobsOptions WithMetadata = new() { Traits = BlobTraits.Metadata };
+
+    public static async Task<bool> SaveAsync(AssessmentResult result, CancellationToken ct)
+    {
+        var container = Client();
+        if (container is null) return false;
+        await container.CreateIfNotExistsAsync(cancellationToken: ct);
+
+        var s = Summarize(result);
+        var name = $"{Slug(result.ClientName)}/{result.ExecutedAt.UtcDateTime:yyyyMMddTHHmmssZ}_{result.InstanceId}.json";
+        var blob = container.GetBlobClient(name);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(result, Json);
+        var metadata = new Dictionary<string, string>
+        {
+            ["id"] = Enc(s.Id), ["client"] = Enc(s.ClientName), ["environment"] = Enc(s.EnvironmentName), ["tenantid"] = Enc(s.TenantId),
+            ["tenantname"] = Enc(s.TenantName), ["executedat"] = s.ExecutedAt.UtcDateTime.ToString("o"), ["frameworks"] = Enc(string.Join(",", s.Frameworks)),
+            ["pillars"] = Enc(string.Join(",", s.Pillars)), ["tests"] = s.Tests.ToString(), ["executed"] = s.Executed.ToString(),
+            ["passed"] = s.Passed.ToString(), ["failed"] = s.Failed.ToString(), ["score"] = s.Score.ToString(), ["version"] = Enc(s.Version),
+        };
+        await blob.UploadAsync(new BinaryData(bytes), new BlobUploadOptions
+        {
+            HttpHeaders = new BlobHttpHeaders { ContentType = "application/json" },
+            Metadata = metadata,
+        }, ct);
+        return true;
+    }
+
+    public static async Task<List<AssessmentSummary>> ListAsync(CancellationToken ct)
+    {
+        var list = new List<AssessmentSummary>();
+        var container = Client();
+        if (container is null || !await container.ExistsAsync(ct)) return list;
+
+        await foreach (var item in container.GetBlobsAsync(WithMetadata, ct))
+        {
+            var m = item.Metadata;
+            if (m is null || !m.ContainsKey("id")) continue;
+            list.Add(new AssessmentSummary
+            {
+                Id = Dec(m["id"]), ClientName = Dec(Meta(m, "client")), EnvironmentName = Dec(Meta(m, "environment")),
+                TenantId = Dec(Meta(m, "tenantid")), TenantName = Meta(m, "tenantname").Length == 0 ? null : Dec(Meta(m, "tenantname")),
+                ExecutedAt = DateTimeOffset.TryParse(Meta(m, "executedat"), out var dt) ? dt : item.Properties.CreatedOn ?? default,
+                Frameworks = Dec(Meta(m, "frameworks")).Split(',', StringSplitOptions.RemoveEmptyEntries).ToList(),
+                Pillars = Dec(Meta(m, "pillars")).Split(',', StringSplitOptions.RemoveEmptyEntries).ToList(),
+                Tests = MetaInt(m, "tests"), Executed = MetaInt(m, "executed"), Passed = MetaInt(m, "passed"),
+                Failed = MetaInt(m, "failed"), Score = MetaInt(m, "score"), Version = Dec(Meta(m, "version")),
+            });
+        }
+        return list.OrderByDescending(x => x.ExecutedAt).ToList();
+    }
+
+    public static async Task<string?> GetJsonAsync(string id, CancellationToken ct)
+    {
+        var container = Client();
+        if (container is null || !await container.ExistsAsync(ct)) return null;
+        await foreach (var item in container.GetBlobsAsync(WithMetadata, ct))
+        {
+            if (item.Metadata is null || Dec(Meta(item.Metadata, "id")) != id) continue;
+            var download = await container.GetBlobClient(item.Name).DownloadContentAsync(ct);
+            return download.Value.Content.ToString();
+        }
+        return null;
+    }
+}
 
 // ------------------------------------------------------------------------------------
 // 4. Catalog
@@ -975,8 +1113,11 @@ public static class AssessmentWorkflow
 
         var failed = findings.Where(f => f.TestStatus == TestStatus.Failed).ToList();
 
-        return new AssessmentResult
+        var result = new AssessmentResult
         {
+            InstanceId = context.InstanceId,
+            ClientName = request.ClientName,
+            EnvironmentName = request.EnvironmentName,
             ExecutedAt = context.CurrentUtcDateTime,
             TenantId = request.TenantId,
             Account = request.ClientId,
@@ -995,7 +1136,17 @@ public static class AssessmentWorkflow
             TenantInfo = overview,
             Tests = findings.OrderBy(f => f.TestRisk).ThenBy(f => f.TestStatus).ThenBy(f => f.TestId).ToList(),
         };
+
+        // File the completed assessment under the client so the history survives Durable's own retention.
+        context.SetCustomStatus(new { phase = "saving", total = checks.Count });
+        await context.CallActivityAsync<bool>(nameof(SaveAssessment), result);
+        return result;
     }
+
+    // Activity: persist the result to blob storage (no-op when no storage connection is configured).
+    [Function(nameof(SaveAssessment))]
+    public static Task<bool> SaveAssessment([ActivityTrigger] AssessmentResult result) =>
+        AssessmentStore.SaveAsync(result, CancellationToken.None);
 
     // Activity: evaluate one check against the target.
     [Function(nameof(RunCheck))]
@@ -1176,6 +1327,33 @@ public static class Api
             customStatus,
             result = completed ? meta.ReadOutputAs<AssessmentResult>() : null,
         });
+    }
+
+    // GET /api/history : every saved assessment (summaries only), newest first. Optional ?client= filter.
+    [Function("ListHistory")]
+    public static async Task<HttpResponseData> ListHistory(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "history")] HttpRequestData req)
+    {
+        var list = await AssessmentStore.ListAsync(CancellationToken.None);
+        var client = System.Web.HttpUtility.ParseQueryString(req.Url.Query).Get("client");
+        if (!string.IsNullOrWhiteSpace(client))
+            list = list.Where(s => s.ClientName.Equals(client, StringComparison.OrdinalIgnoreCase)).ToList();
+        return await WriteJson(req, HttpStatusCode.OK, list);
+    }
+
+    // GET /api/history/{id} : the full saved result for one assessment.
+    [Function("GetHistoryItem")]
+    public static async Task<HttpResponseData> GetHistoryItem(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "history/{id}")] HttpRequestData req,
+        string id)
+    {
+        var json = await AssessmentStore.GetJsonAsync(id, CancellationToken.None);
+        if (json is null)
+            return await WriteJson(req, HttpStatusCode.NotFound, new { error = "assessment not found" });
+        var res = req.CreateResponse(HttpStatusCode.OK);
+        res.Headers.Add("Content-Type", "application/json; charset=utf-8");
+        await res.WriteStringAsync(json);
+        return res;
     }
 
     private static async Task<HttpResponseData> WriteJson(HttpRequestData req, HttpStatusCode status, object payload)
