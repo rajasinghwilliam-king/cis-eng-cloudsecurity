@@ -12,12 +12,14 @@ Everything is driven by per-environment JSON reference files and a global naming
 ├── variable/                 # reusable per-environment references (JSON)
 │   ├── dev.json              # DEV (develop branch)
 │   └── prd.json              # PRD (main branch)
-├── src/                      # function app code — one workflow per class under src/Workflows/
+├── src/                      # function app project
 │   ├── host.json
 │   ├── cis-eng-functionapps.csproj
-│   ├── Program.cs
-│   └── Workflows/
-│       └── HelloWorkflow.cs
+│   └── Assessments/          # the app itself: ONE C# file + ONE HTML file
+│       ├── CloudSecurityAssessment.cs   # host, models, catalog, connectors, Durable workflow, HTTP API
+│       └── index.html                   # the UST web app (embedded, served at GET /api/ui)
+├── docs/
+│   └── zero-trust-assessment-parameters.md  # every parameter + the 336-test catalog from microsoft/zerotrustassessment
 ├── terraform/                # ALL Terraform lives here
 │   ├── versions.tf providers.tf backend.tf
 │   ├── variables.tf config.tf locals.tf data.tf
@@ -59,22 +61,37 @@ Each JSON is the single reusable source of truth for an environment. Terraform r
 
 ## 2. Application code (`src/`) — Cloud Security Assessment app
 
-`src/` is the .NET 8 isolated Durable Functions project. It runs security-framework assessments
-(Zero Trust, ISO 27001, CIS Azure, CIS AWS) against a **target** environment and returns findings
-grouped by High / Medium / Low.
+`src/` is the **.NET 8 isolated-worker** Durable Functions project (`FUNCTIONS_WORKER_RUNTIME=dotnet-isolated`,
+`dotnet_version=v8.0`; Terraform rejects any non-.NET runtime). It runs security assessments against a
+**target** Microsoft tenant and returns results per Zero Trust pillar (Identity, Devices, Network, Data,
+Infrastructure, SecOps, AI) with Risk / User impact / Implementation effort for every test.
 
-- `Assessments/Models.cs` — request, finding, severity, and result models.
-- `Assessments/Catalog.cs` — the check catalog per framework and the `ICloudConnector` abstraction.
-  A deterministic `StubCloudConnector` ships so the app runs end-to-end today; replace it (and
-  `CloudConnectorFactory`) with real **Azure** (`Azure.Identity` + ARM/Graph) and **AWS** (AWS SDK)
-  logic that connects using the supplied target tenant + service principal / role.
-- `Workflows/AssessmentWorkflow.cs` — Durable orchestration (fan-out/fan-in over checks), the
-  `RunCheck` activity, and the `POST /api/assessments` starter.
-- `Api/WebUi.cs` + `ui/index.html` — the UST-branded single-page UI, served at `GET /api/ui`.
+The code is deliberately two files, both under `src/Assessments/`:
+
+- `CloudSecurityAssessment.cs` — everything server-side, in numbered sections:
+  1. host bootstrap, 2. vocabulary (enums and lists mirrored from
+  [microsoft/zerotrustassessment](https://github.com/microsoft/zerotrustassessment)), 3. models,
+  4. the check catalog (**336 Zero Trust tests** generated from the Microsoft module's `[ZtTest]`
+  attributes, plus UST ISO 27001 / CIS Azure / CIS AWS checks), 5. `ICloudConnector` + a deterministic
+  `StubCloudConnector` (skip rules mirror the Microsoft module; replace it via `CloudConnectorFactory`
+  with Graph/ARM/AWS SDK logic), 6. the Durable orchestration (fan-out one activity per check, fan-in),
+  7. the HTTP API.
+- `index.html` — the UST-branded single-page app (vanilla JS, no build step). Layout follows the
+  Microsoft Zero Trust Assessment report: Overview (tenant info, metric tiles, passed/total per pillar,
+  failed-by-risk), one page per pillar with search, Risk / Status / SFI-pillar filters, column picker,
+  sortable table, and a right-hand detail sheet per test. Light and dark themes, UST logo and tokens.
+
+Request parameters follow `Connect-ZtAssessment` / `Invoke-ZtAssessment` (tenantId, environment,
+clientId, services, pillars, tests, tenantType, days, maximumSignInLogQueryTime, testThrottleLimit,
+testTimeoutMinutes, preview, exchangeEnvironmentName, userPrincipalName, sharePointAdminUrl,
+subscriptionIds). The full reference, including every module setting and the test catalog, is in
+[docs/zero-trust-assessment-parameters.md](docs/zero-trust-assessment-parameters.md).
 
 **Endpoints**
-- `GET /api/ui` — the web UI.
-- `POST /api/assessments` — start an assessment; returns Durable status URLs the UI polls.
+- `GET /api/ui` — the web app.
+- `GET /api/catalog` — vocabulary + the full check catalog (the page renders this before any run).
+- `POST /api/assessments` — validate and start an assessment; returns `{ id, checks, statusQueryGetUri }`.
+- `GET /api/assessments/{instanceId}` — `{ runtimeStatus, customStatus, result }` in camelCase.
 
 > **Credentials:** the target service-principal secret is used only to connect for the assessment.
 > Use a least-privilege (read-only) principal and store secrets in Key Vault in production — never log them.

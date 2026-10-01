@@ -59,7 +59,12 @@ variable "storage_allowed_ip_rules" {
 
 variable "functions_worker_runtime" {
   type        = string
-  description = "Functions worker runtime."
+  description = "Functions worker runtime. This app is .NET only: \"dotnet-isolated\" (recommended) or \"dotnet\" (in-process)."
+
+  validation {
+    condition     = contains(["dotnet-isolated", "dotnet"], var.functions_worker_runtime)
+    error_message = "functions_worker_runtime must be \"dotnet-isolated\" or \"dotnet\". The Function App is a .NET 8 isolated worker; set functions_worker_runtime in variable/<env>.json accordingly."
+  }
 }
 
 variable "functions_extension_version" {
@@ -70,8 +75,13 @@ variable "functions_extension_version" {
 
 variable "dotnet_version" {
   type        = string
-  description = ".NET version for dotnet stacks."
+  description = ".NET version for the dotnet application stack (the app targets net8.0)."
   default     = "v8.0"
+
+  validation {
+    condition     = contains(["v8.0", "v9.0"], var.dotnet_version)
+    error_message = "dotnet_version must be \"v8.0\" or \"v9.0\" to match a supported .NET isolated worker."
+  }
 }
 
 variable "always_on" {

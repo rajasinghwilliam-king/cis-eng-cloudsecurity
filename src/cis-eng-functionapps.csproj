@@ -24,8 +24,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The single-page UST UI is embedded and served by the WebUi function. -->
-    <EmbeddedResource Include="ui\index.html" />
+    <!-- The single-page UST web app is embedded and served by the WebUi function in Assessments\CloudSecurityAssessment.cs. -->
+    <EmbeddedResource Include="Assessments\index.html" LogicalName="index.html" />
   </ItemGroup>
 
 </Project>
