@@ -61,8 +61,9 @@ Each JSON is the single reusable source of truth for an environment. Terraform r
 
 ## 2. Application code (`src/`) — Cloud Security Assessment app
 
-`src/` is the **.NET 8 isolated-worker** Durable Functions project (`FUNCTIONS_WORKER_RUNTIME=dotnet-isolated`,
-`dotnet_version=v8.0`; Terraform rejects any non-.NET runtime). It runs security assessments against a
+`src/` is the **.NET 10 isolated-worker** Durable Functions project (`FUNCTIONS_WORKER_RUNTIME=dotnet-isolated`,
+`dotnet_version=v10.0`; Terraform rejects any non-.NET runtime and any .NET version other than 10, because
+.NET 8 and .NET 9 leave support on 10 November 2026). It runs security assessments against a
 **target** Microsoft tenant and returns results per Zero Trust pillar (Identity, Devices, Network, Data,
 Infrastructure, SecOps, AI) with Risk / User impact / Implementation effort for every test.
 
@@ -72,20 +73,28 @@ The code is deliberately two files, both under `src/Assessments/`:
   1. host bootstrap, 2. vocabulary (enums and lists mirrored from
   [microsoft/zerotrustassessment](https://github.com/microsoft/zerotrustassessment)), 3. models,
   4. the check catalog (**336 Zero Trust tests** generated from the Microsoft module's `[ZtTest]`
-  attributes, plus UST ISO 27001 / CIS Azure / CIS AWS checks), 5. `ICloudConnector` + a deterministic
+  attributes, **113 CIS Microsoft Azure Foundations Benchmark v5.0.0 controls** from
+  [vegazbabz/CIS-Azure-Benchmark-Audit-Tool](https://github.com/vegazbabz/CIS-Azure-Benchmark-Audit-Tool),
+  plus UST ISO 27001 / CIS AWS checks), 5. `ICloudConnector` + a deterministic
   `StubCloudConnector` (skip rules mirror the Microsoft module; replace it via `CloudConnectorFactory`
   with Graph/ARM/AWS SDK logic), 6. the Durable orchestration (fan-out one activity per check, fan-in),
   7. the HTTP API.
-- `index.html` — the UST-branded single-page app (vanilla JS, no build step). Layout follows the
-  Microsoft Zero Trust Assessment report: Overview (tenant info, metric tiles, passed/total per pillar,
-  failed-by-risk), one page per pillar with search, Risk / Status / SFI-pillar filters, column picker,
-  sortable table, and a right-hand detail sheet per test. Light and dark themes, UST logo and tokens.
+- `index.html` — the UST-branded single-page app (vanilla JS, no build step, inline SVG charts).
+  Layout follows the Microsoft Zero Trust Assessment report: an Overview with tenant info, metric
+  tiles, a compliance-score donut, results-by-pillar stacked bars, a pillar-by-risk heatmap, a
+  risk-by-effort "quick wins" matrix, pass rate by SFI pillar, top failing categories and a CIS
+  section/level chart; one page per pillar with search, Risk / Status / SFI-pillar filters, column
+  picker, sortable table, and a right-hand detail sheet per test. Every chart has a table view and
+  hover tooltips. Light and dark themes, UST logo and tokens; chart palettes validated for
+  colour-vision safety.
 
 Request parameters follow `Connect-ZtAssessment` / `Invoke-ZtAssessment` (tenantId, environment,
 clientId, services, pillars, tests, tenantType, days, maximumSignInLogQueryTime, testThrottleLimit,
 testTimeoutMinutes, preview, exchangeEnvironmentName, userPrincipalName, sharePointAdminUrl,
-subscriptionIds). The full reference, including every module setting and the test catalog, is in
-[docs/zero-trust-assessment-parameters.md](docs/zero-trust-assessment-parameters.md).
+subscriptionIds) plus the CIS audit tool's `cisLevel` (`--level`) and `suppressions[]`
+(`suppressions.toml`). Full references, including the test catalogs:
+[docs/zero-trust-assessment-parameters.md](docs/zero-trust-assessment-parameters.md) and
+[docs/cis-azure-benchmark-parameters.md](docs/cis-azure-benchmark-parameters.md).
 
 **Endpoints**
 - `GET /api/ui` — the web app.

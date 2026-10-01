@@ -12,7 +12,7 @@
   "always_on": true,
   "zone_balancing_enabled": false,
   "functions_worker_runtime": "dotnet-isolated",
-  "dotnet_version": "v8.0",
+  "dotnet_version": "v10.0",
   "storage_replication_type": "LRS",
 
   "storage": {

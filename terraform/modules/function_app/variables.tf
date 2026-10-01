@@ -63,7 +63,7 @@ variable "functions_worker_runtime" {
 
   validation {
     condition     = contains(["dotnet-isolated", "dotnet"], var.functions_worker_runtime)
-    error_message = "functions_worker_runtime must be \"dotnet-isolated\" or \"dotnet\". The Function App is a .NET 8 isolated worker; set functions_worker_runtime in variable/<env>.json accordingly."
+    error_message = "functions_worker_runtime must be \"dotnet-isolated\" or \"dotnet\". The Function App is a .NET isolated worker; set functions_worker_runtime in variable/<env>.json accordingly."
   }
 }
 
@@ -75,12 +75,13 @@ variable "functions_extension_version" {
 
 variable "dotnet_version" {
   type        = string
-  description = ".NET version for the dotnet application stack (the app targets net8.0)."
-  default     = "v8.0"
+  description = ".NET version for the dotnet application stack, in the Windows form (\"v10.0\"); the module strips the \"v\" for Linux. The app targets net10.0 (LTS, supported to Nov 2028)."
+  default     = "v10.0"
 
   validation {
-    condition     = contains(["v8.0", "v9.0"], var.dotnet_version)
-    error_message = "dotnet_version must be \"v8.0\" or \"v9.0\" to match a supported .NET isolated worker."
+    # .NET 8 and .NET 9 both leave support on 10 Nov 2026, so only .NET 10 is accepted.
+    condition     = contains(["v10.0"], var.dotnet_version)
+    error_message = "dotnet_version must be \"v10.0\". .NET 8 and .NET 9 reach end of support on 10 November 2026 and are not allowed."
   }
 }
 

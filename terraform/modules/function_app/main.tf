@@ -188,7 +188,8 @@ resource "azurerm_linux_function_app" "this" {
     application_insights_connection_string = var.application_insights_connection_string
 
     application_stack {
-      dotnet_version              = var.dotnet_version
+      # Linux expects "10.0" where Windows expects "v10.0".
+      dotnet_version              = trimprefix(var.dotnet_version, "v")
       use_dotnet_isolated_runtime = var.functions_worker_runtime == "dotnet-isolated"
     }
   }

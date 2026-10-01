@@ -55,9 +55,10 @@ public enum Risk { Critical, High, Medium, Low, Unranked }
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum Level { Low, Medium, High, Catastrophic }
 
-// TestStatus values written to the report JSON
+// TestStatus values written to the report JSON. Suppressed comes from the CIS audit tool:
+// an accepted risk with a justification and expiry; it is excluded from the compliance score.
 [JsonConverter(typeof(JsonStringEnumConverter))]
-public enum TestStatus { Passed, Failed, Skipped, Planned, Investigate, Error }
+public enum TestStatus { Passed, Failed, Skipped, Planned, Investigate, Error, Suppressed }
 
 // Add-ZtTestResultDetail -SkippedBecause
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -167,9 +168,13 @@ public sealed class AssessmentRequest
     public bool Preview { get; set; }                                      // -Preview
 
     // --- Infrastructure pillar (Defender for Cloud) and CIS AWS ---
-    public List<string> SubscriptionIds { get; set; } = new();           // Azure subscriptions in scope
+    public List<string> SubscriptionIds { get; set; } = new();           // Azure subscriptions in scope (CIS: --subscription)
     public string? AwsAccountId { get; set; }
     public string? AwsRoleArn { get; set; }
+
+    // --- CIS Microsoft Azure Foundations Benchmark (vegazbabz/CIS-Azure-Benchmark-Audit-Tool) ---
+    public int? CisLevel { get; set; }                                    // --level 1|2 (null = both profiles)
+    public List<Suppression> Suppressions { get; set; } = new();          // suppressions.toml entries (accepted risks)
 
     public bool ConnectsTo(string service) =>
         Services.Contains("All", StringComparer.OrdinalIgnoreCase) ||
@@ -196,8 +201,33 @@ public sealed class AssessmentRequest
             if (s != "All" && !Vocabulary.Services.Contains(s)) return $"Unknown service '{s}'.";
         if (Frameworks.Contains("cis-aws", StringComparer.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(AwsAccountId))
             return "awsAccountId is required for the CIS AWS framework.";
+        if (CisLevel is not (null or 1 or 2)) return "cisLevel must be 1, 2 or empty.";
+        foreach (var s in Suppressions)
+        {
+            if (string.IsNullOrWhiteSpace(s.ControlId)) return "Each suppression needs a controlId.";
+            if (string.IsNullOrWhiteSpace(s.Justification)) return $"Suppression {s.ControlId} needs a justification.";
+            if (!DateOnly.TryParse(s.Expires, out var exp)) return $"Suppression {s.ControlId} needs an ISO expiry date (YYYY-MM-DD).";
+            if (exp > DateOnly.FromDateTime(DateTime.UtcNow).AddYears(1)) return $"Suppression {s.ControlId} may expire at most one year from today.";
+        }
         return null;
     }
+}
+
+// An accepted risk, as in the CIS audit tool's suppressions.toml. Only Failed / Error results can be suppressed;
+// expired entries are ignored and the finding reverts to its real status.
+public sealed class Suppression
+{
+    public string ControlId { get; set; } = string.Empty;   // exact match on the check / control ID
+    public string? Resource { get; set; }                   // optional, exact case-insensitive match
+    public string? Subscription { get; set; }               // optional, exact case-insensitive match
+    public string Justification { get; set; } = string.Empty;
+    public string Expires { get; set; } = string.Empty;     // ISO date, at most one year ahead
+
+    public bool IsActive(DateTime utcNow) => DateOnly.TryParse(Expires, out var exp) && exp >= DateOnly.FromDateTime(utcNow);
+
+    public bool Matches(Finding f) =>
+        string.Equals(ControlId, f.TestId, StringComparison.OrdinalIgnoreCase) &&
+        (string.IsNullOrWhiteSpace(Resource) || string.Equals(Resource, f.Resource, StringComparison.OrdinalIgnoreCase));
 }
 
 // One entry of the check catalog. Field names mirror the [ZtTest] attribute.
@@ -215,7 +245,9 @@ public sealed record Check(
     string[] Service,
     string[] MinimumLicense,
     string[] CompatibleLicense,
-    string? Recommendation = null);
+    string? Recommendation = null,
+    string? Profile = null,       // CIS profile applicability: "L1" or "L2"
+    bool Manual = false);         // CIS: cannot be automated, needs human review
 
 // One row of the report. Field names mirror the Zero Trust report JSON (Tests[]).
 public sealed class Finding
@@ -231,6 +263,9 @@ public sealed class Finding
     public string TestSfiPillar { get; set; } = string.Empty;
     public string[] TestMinimumLicense { get; set; } = Array.Empty<string>();
     public string[] TestService { get; set; } = Array.Empty<string>();
+    public string? TestProfile { get; set; }          // CIS: "L1" / "L2"
+    public bool TestManual { get; set; }              // CIS: manual control
+    public string? SuppressionJustification { get; set; }
     public TestStatus TestStatus { get; set; }
     public SkipReason TestSkipped { get; set; } = SkipReason.None;
     public string? SkippedReason { get; set; }
@@ -247,6 +282,7 @@ public sealed class PillarSummary
     public int Failed { get; set; }
     public int Skipped { get; set; }
     public int Planned { get; set; }
+    public int Suppressed { get; set; }
     public int Total { get; set; }   // executed tests (Passed + Failed + Investigate + Error), as in the Microsoft report
 }
 
@@ -299,7 +335,7 @@ public static class Catalog
     {
         ("zero-trust", "Zero Trust Assessment (Microsoft)", "github.com/microsoft/zerotrustassessment"),
         ("iso-27001", "ISO 27001", "UST catalog"),
-        ("cis-azure", "CIS Benchmark - Azure", "UST catalog"),
+        ("cis-azure", "CIS Microsoft Azure Foundations Benchmark v5.0.0", "github.com/vegazbabz/CIS-Azure-Benchmark-Audit-Tool"),
         ("cis-aws", "CIS Benchmark - AWS", "UST catalog"),
     };
 
@@ -316,12 +352,36 @@ public static class Catalog
         var pillars = new HashSet<string>(r.Pillars, StringComparer.OrdinalIgnoreCase);
         var ids = new HashSet<string>(r.Tests.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()), StringComparer.OrdinalIgnoreCase);
 
+        string? level = r.CisLevel is null ? null : $"L{r.CisLevel}";
+
         return All.Where(c =>
             frameworks.Contains(c.Framework) &&
             (allPillars || c.Pillars.Any(pillars.Contains)) &&
             (ids.Count == 0 || ids.Contains(c.Id)) &&
-            (c.TenantType.Length == 0 || c.TenantType.Contains(r.TenantType, StringComparer.OrdinalIgnoreCase)));
+            (c.TenantType.Length == 0 || c.TenantType.Contains(r.TenantType, StringComparer.OrdinalIgnoreCase)) &&
+            (level is null || c.Profile is null || c.Profile == level));
     }
+
+    // CIS section number -> Zero Trust pillar, so CIS controls appear on the pillar pages.
+    private static string CisPillar(string section) => section[0] switch
+    {
+        '2' => "Data",            // Azure Databricks
+        '3' => "Infrastructure",  // Compute Services
+        '5' => "Identity",        // Identity Services
+        '6' => "SecOps",          // Logging and Monitoring
+        '7' => "Network",         // Networking Services
+        '8' => "Infrastructure",  // Security Services (Defender, Key Vault, Bastion, DDoS)
+        '9' => "Data",            // Storage Services
+        _ => "Infrastructure",
+    };
+
+    // A CIS Microsoft Azure Foundations Benchmark v5.0.0 control, from the audit tool's control catalog.
+    // Level 1 is the baseline profile (mapped to High risk); Level 2 is defence in depth (Medium).
+    private static Check Cis(string id, string section, int level, string title, bool manual) =>
+        new(id, "cis-azure", new[] { CisPillar(section) }, section, level == 1 ? Risk.High : Risk.Medium,
+            Level.Low, manual ? Level.Low : Level.Medium, string.Empty, title,
+            Array.Empty<string>(), new[] { section.StartsWith('5') ? "Graph" : "Azure" }, Array.Empty<string>(), Array.Empty<string>(),
+            null, $"L{level}", manual);
 
     private static string[] Split(string s) =>
         string.IsNullOrWhiteSpace(s) ? Array.Empty<string>() : s.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -684,11 +744,121 @@ public static class Catalog
         Ust("iso-logging", "iso-27001", "SecOps", "Monitoring", Risk.Medium, "Security logging and monitoring enabled", "Centralize logs and configure alerting.", "Azure"),
         Ust("iso-backup", "iso-27001", "Infrastructure", "Resilience", Risk.Low, "Backup and recovery configured and tested", "Configure and periodically test backups for critical workloads.", "Azure"),
 
-        // ---------------- CIS Benchmark - Azure ----------------
-        Ust("cis-az-storage-public", "cis-azure", "Infrastructure", "Storage", Risk.High, "Storage accounts disallow public blob access", "Set allowBlobPublicAccess=false on all storage accounts.", "Azure"),
-        Ust("cis-az-defender", "cis-azure", "Infrastructure", "Defender for Cloud", Risk.High, "Microsoft Defender for Cloud enabled", "Enable Defender for Cloud on all subscriptions.", "Azure"),
-        Ust("cis-az-kv-purge", "cis-azure", "Infrastructure", "Key Vault", Risk.Medium, "Key Vaults have soft delete and purge protection", "Enable soft delete and purge protection on all Key Vaults.", "Azure"),
-        Ust("cis-az-nsg-flowlogs", "cis-azure", "Network", "Networking", Risk.Low, "NSG flow logs enabled", "Enable NSG flow logs and send them to a Log Analytics workspace.", "Azure"),
+        // ---------------- CIS Microsoft Azure Foundations Benchmark v5.0.0: 113 controls ----------------
+        // Generated from the "Controls Covered" tables of vegazbabz/CIS-Azure-Benchmark-Audit-Tool (102 automated, 11 manual).
+            Cis("2.1.1", "2 - Azure Databricks", 2, "Databricks deployed in customer-managed VNet", false),
+            Cis("2.1.2", "2 - Azure Databricks", 1, "NSGs configured for Databricks subnets", false),
+            Cis("2.1.7", "2 - Azure Databricks", 1, "Diagnostic logging configured", false),
+            Cis("2.1.8", "2 - Azure Databricks", 2, "Databricks encryption uses customer-managed keys", false),
+            Cis("2.1.9", "2 - Azure Databricks", 1, "No Public IP enabled", false),
+            Cis("2.1.10", "2 - Azure Databricks", 1, "Public network access disabled", false),
+            Cis("2.1.11", "2 - Azure Databricks", 2, "Private endpoints used to access workspaces", false),
+            Cis("3.1.1", "3 - Compute Services", 2, "Only MFA-enabled identities can access privileged VMs", true),
+            Cis("5.1.1", "5 - Identity Services", 1, "Security defaults enabled", false),
+            Cis("5.1.2", "5 - Identity Services", 1, "MFA enabled for all users", false),
+            Cis("5.1.3", "5 - Identity Services", 1, "Allow users to remember MFA on trusted devices disabled", true),
+            Cis("5.2.2", "5 - Identity Services", 1, "Exclusionary geographic Conditional Access policy considered", true),
+            Cis("5.3.2", "5 - Identity Services", 1, "Guest users reviewed on a regular basis", true),
+            Cis("5.3.3", "5 - Identity Services", 1, "User Access Administrator role restricted", false),
+            Cis("5.4", "5 - Identity Services", 1, "Restrict non-admin users from creating tenants", false),
+            Cis("5.6", "5 - Identity Services", 1, "Account lockout threshold <= 10", false),
+            Cis("5.14", "5 - Identity Services", 1, "Users cannot register applications", false),
+            Cis("5.15", "5 - Identity Services", 1, "Guest access restricted to own directory objects", false),
+            Cis("5.16", "5 - Identity Services", 2, "Guest invite restrictions set to admins or no one", false),
+            Cis("5.23", "5 - Identity Services", 1, "No custom subscription administrator roles", false),
+            Cis("5.27", "5 - Identity Services", 1, "Between 2 and 3 subscription owners", false),
+            Cis("5.28", "5 - Identity Services", 1, "Privileged users protected by phishing-resistant MFA", true),
+            Cis("6.1.1.1", "6 - Logging and Monitoring", 1, "Diagnostic Setting exists for Subscription Activity Logs", false),
+            Cis("6.1.1.2", "6 - Logging and Monitoring", 1, "Diagnostic Setting captures required categories", false),
+            Cis("6.1.1.3", "6 - Logging and Monitoring", 1, "Activity log retention >= 365 days", false),
+            Cis("6.1.1.4", "6 - Logging and Monitoring", 1, "Key Vault diagnostic logging enabled", false),
+            Cis("6.1.1.6", "6 - Logging and Monitoring", 2, "Azure AppService HTTP logs enabled", false),
+            Cis("6.1.2.1", "6 - Logging and Monitoring", 1, "Activity Log Alert: Create Policy Assignment", false),
+            Cis("6.1.2.2", "6 - Logging and Monitoring", 1, "Activity Log Alert: Delete Policy Assignment", false),
+            Cis("6.1.2.3", "6 - Logging and Monitoring", 1, "Activity Log Alert: Create or Update NSG", false),
+            Cis("6.1.2.4", "6 - Logging and Monitoring", 1, "Activity Log Alert: Delete NSG", false),
+            Cis("6.1.2.5", "6 - Logging and Monitoring", 1, "Activity Log Alert: Create or Update Security Solution", false),
+            Cis("6.1.2.6", "6 - Logging and Monitoring", 1, "Activity Log Alert: Delete Security Solution", false),
+            Cis("6.1.2.7", "6 - Logging and Monitoring", 1, "Activity Log Alert: Create or Update SQL Firewall Rule", false),
+            Cis("6.1.2.8", "6 - Logging and Monitoring", 1, "Activity Log Alert: Delete SQL Firewall Rule", false),
+            Cis("6.1.2.9", "6 - Logging and Monitoring", 1, "Activity Log Alert: Create or Update Public IP", false),
+            Cis("6.1.2.10", "6 - Logging and Monitoring", 1, "Activity Log Alert: Delete Public IP", false),
+            Cis("6.1.2.11", "6 - Logging and Monitoring", 1, "Activity Log Alert: Service Health", false),
+            Cis("6.1.3.1", "6 - Logging and Monitoring", 2, "Application Insights configured", false),
+            Cis("6.1.4", "6 - Logging and Monitoring", 1, "Azure Monitor resource logging enabled for all services", true),
+            Cis("6.1.5", "6 - Logging and Monitoring", 1, "SKU Basic/Consumption not used on production artifacts", true),
+            Cis("6.2", "6 - Logging and Monitoring", 2, "Resource Locks set for mission-critical Azure resources", true),
+            Cis("7.1", "7 - Networking Services", 1, "RDP (3389) not open to internet", false),
+            Cis("7.2", "7 - Networking Services", 1, "SSH (22) not open to internet", false),
+            Cis("7.3", "7 - Networking Services", 1, "UDP access from internet restricted", false),
+            Cis("7.4", "7 - Networking Services", 1, "HTTP/HTTPS (80/443) from internet evaluated and restricted", false),
+            Cis("7.5", "7 - Networking Services", 2, "NSG flow log retention >= 90 days", false),
+            Cis("7.6", "7 - Networking Services", 2, "Network Watcher enabled for all regions in use", false),
+            Cis("7.7", "7 - Networking Services", 1, "Public IP addresses evaluated on a periodic basis", true),
+            Cis("7.8", "7 - Networking Services", 2, "VNet flow log retention >= 90 days", false),
+            Cis("7.9", "7 - Networking Services", 2, "VPN Gateway P2S uses Azure AD authentication", false),
+            Cis("7.10", "7 - Networking Services", 2, "WAF enabled on Azure Application Gateway", false),
+            Cis("7.11", "7 - Networking Services", 1, "Subnets associated with NSGs", false),
+            Cis("7.12", "7 - Networking Services", 1, "App Gateway SSL policy min TLS 1.2+", false),
+            Cis("7.13", "7 - Networking Services", 1, "HTTP2 enabled on Application Gateway", false),
+            Cis("7.14", "7 - Networking Services", 2, "WAF request body inspection enabled", false),
+            Cis("7.15", "7 - Networking Services", 2, "WAF bot protection enabled", false),
+            Cis("7.16", "7 - Networking Services", 2, "Azure Network Security Perimeter (NSP) is used", true),
+            Cis("8.1.1.1", "8 - Security Services", 2, "Microsoft Defender CSPM", false),
+            Cis("8.1.2.1", "8 - Security Services", 2, "Microsoft Defender for APIs", false),
+            Cis("8.1.3.1", "8 - Security Services", 2, "Microsoft Defender for Servers", false),
+            Cis("8.1.3.3", "8 - Security Services", 2, "Endpoint protection (WDATP) component", false),
+            Cis("8.1.4.1", "8 - Security Services", 2, "Microsoft Defender for Containers", false),
+            Cis("8.1.5.1", "8 - Security Services", 2, "Microsoft Defender for Storage", false),
+            Cis("8.1.6.1", "8 - Security Services", 2, "Microsoft Defender for App Services", false),
+            Cis("8.1.7.1", "8 - Security Services", 2, "Microsoft Defender for Azure Cosmos DB", false),
+            Cis("8.1.7.2", "8 - Security Services", 2, "Microsoft Defender for Open-Source Relational DBs", false),
+            Cis("8.1.7.3", "8 - Security Services", 2, "Microsoft Defender for SQL (Managed Instance)", false),
+            Cis("8.1.7.4", "8 - Security Services", 2, "Microsoft Defender for SQL Servers on Machines", false),
+            Cis("8.1.8.1", "8 - Security Services", 2, "Microsoft Defender for Key Vault", false),
+            Cis("8.1.9.1", "8 - Security Services", 2, "Microsoft Defender for Resource Manager", false),
+            Cis("8.1.10", "8 - Security Services", 1, "Defender configured to check VM OS updates", false),
+            Cis("8.1.12", "8 - Security Services", 1, "Security alerts notify subscription Owners", false),
+            Cis("8.1.13", "8 - Security Services", 1, "Additional email addresses for security contact", false),
+            Cis("8.1.14", "8 - Security Services", 1, "Alert severity notifications configured", false),
+            Cis("8.1.15", "8 - Security Services", 1, "Attack path notifications configured", false),
+            Cis("8.3.1", "8 - Security Services", 1, "Key expiration set - RBAC Key Vaults", false),
+            Cis("8.3.2", "8 - Security Services", 1, "Key expiration set - non-RBAC Key Vaults", false),
+            Cis("8.3.3", "8 - Security Services", 1, "Secret expiration set - RBAC Key Vaults", false),
+            Cis("8.3.4", "8 - Security Services", 1, "Secret expiration set - non-RBAC Key Vaults", false),
+            Cis("8.3.5", "8 - Security Services", 1, "Key Vault purge protection enabled", false),
+            Cis("8.3.6", "8 - Security Services", 2, "Key Vault RBAC authorization enabled", false),
+            Cis("8.3.7", "8 - Security Services", 1, "Key Vault public network access disabled", false),
+            Cis("8.3.8", "8 - Security Services", 2, "Private endpoints used to access Key Vault", false),
+            Cis("8.3.9", "8 - Security Services", 2, "Automatic key rotation enabled", false),
+            Cis("8.3.10", "8 - Security Services", 2, "Key Vault Managed HSM used when required", true),
+            Cis("8.3.11", "8 - Security Services", 1, "Certificate validity period <= 12 months", false),
+            Cis("8.4.1", "8 - Security Services", 2, "Azure Bastion Host exists", false),
+            Cis("8.5", "8 - Security Services", 2, "DDoS Network Protection enabled on VNets", false),
+            Cis("9.1.1", "9 - Storage Services", 1, "Azure Files soft delete enabled", false),
+            Cis("9.1.2", "9 - Storage Services", 1, "SMB protocol version >= 3.1.1", false),
+            Cis("9.1.3", "9 - Storage Services", 1, "SMB channel encryption AES-256-GCM or higher", false),
+            Cis("9.2.1", "9 - Storage Services", 1, "Blob soft delete enabled", false),
+            Cis("9.2.2", "9 - Storage Services", 1, "Container soft delete enabled", false),
+            Cis("9.2.3", "9 - Storage Services", 2, "Blob versioning enabled", false),
+            Cis("9.2.4", "9 - Storage Services", 2, "Storage logging enabled for Blob Service read requests", false),
+            Cis("9.2.5", "9 - Storage Services", 2, "Storage logging enabled for Blob Service write requests", false),
+            Cis("9.2.6", "9 - Storage Services", 2, "Storage logging enabled for Blob Service delete requests", false),
+            Cis("9.3.1.1", "9 - Storage Services", 1, "Key rotation reminders enabled", false),
+            Cis("9.3.1.2", "9 - Storage Services", 1, "Access keys regenerated within 90 days", false),
+            Cis("9.3.1.3", "9 - Storage Services", 1, "Storage account key access disabled", false),
+            Cis("9.3.2.1", "9 - Storage Services", 2, "Private endpoints used to access storage accounts", false),
+            Cis("9.3.2.2", "9 - Storage Services", 1, "Public network access disabled", false),
+            Cis("9.3.2.3", "9 - Storage Services", 1, "Default network access rule is Deny", false),
+            Cis("9.3.3.1", "9 - Storage Services", 1, "Default to Microsoft Entra authorization in Azure portal", false),
+            Cis("9.3.4", "9 - Storage Services", 1, "Secure transfer (HTTPS) required", false),
+            Cis("9.3.5", "9 - Storage Services", 2, "Allow Azure trusted services to access storage", false),
+            Cis("9.3.6", "9 - Storage Services", 1, "Minimum TLS version 1.2", false),
+            Cis("9.3.7", "9 - Storage Services", 1, "Cross-tenant replication disabled", false),
+            Cis("9.3.8", "9 - Storage Services", 1, "Blob anonymous access disabled", false),
+            Cis("9.3.9", "9 - Storage Services", 1, "Storage account has CanNotDelete resource lock", false),
+            Cis("9.3.10", "9 - Storage Services", 2, "Storage account has ReadOnly resource lock", false),
+            Cis("9.3.11", "9 - Storage Services", 2, "Redundancy set to geo-redundant (GRS)", false),
 
         // ---------------- CIS Benchmark - AWS ----------------
         Ust("cis-aws-root-mfa", "cis-aws", "Identity", "IAM", Risk.High, "Root account has MFA enabled", "Enable hardware MFA on the AWS root account.", ""),
@@ -740,6 +910,11 @@ public sealed class StubCloudConnector : ICloudConnector
         var missing = check.Service.Where(s => !_r.ConnectsTo(s)).ToArray();
         if (missing.Length > 0)
             return Task.FromResult(new CheckOutcome(TestStatus.Skipped, null, SkipReason.NotConnectedToService, string.Join(", ", missing)));
+
+        // CIS manual controls cannot be automated: report them for human review (the CIS tool's MANUAL status).
+        if (check.Manual)
+            return Task.FromResult(new CheckOutcome(TestStatus.Investigate,
+                $"Manual review required. This CIS control cannot be audited from the Azure control plane; verify it per the CIS Microsoft Azure Foundations Benchmark v5.0.0.\n\n**Control**\n\n{check.Id} {check.Title} ({check.Profile})"));
 
         bool pass = Hash($"{_r.TenantId}:{_r.AwsAccountId}:{check.Id}") % 10 >= 4; // ~60% compliant
         string result = pass
@@ -793,7 +968,8 @@ public static class AssessmentWorkflow
                 Failed = inPillar.Count(f => f.TestStatus is TestStatus.Failed or TestStatus.Error or TestStatus.Investigate),
                 Skipped = inPillar.Count(f => f.TestStatus == TestStatus.Skipped),
                 Planned = inPillar.Count(f => f.TestStatus == TestStatus.Planned),
-                Total = inPillar.Count(f => f.TestStatus is not (TestStatus.Skipped or TestStatus.Planned)),
+                Suppressed = inPillar.Count(f => f.TestStatus == TestStatus.Suppressed),
+                Total = inPillar.Count(f => f.TestStatus is not (TestStatus.Skipped or TestStatus.Planned or TestStatus.Suppressed)),
             };
         }).ToList();
 
@@ -843,7 +1019,7 @@ public static class AssessmentWorkflow
             outcome = new CheckOutcome(TestStatus.Error, $"Error while evaluating the check: {ex.GetType().Name}");
         }
 
-        return new Finding
+        var finding = new Finding
         {
             TestId = check.Id,
             TestTitle = check.Title,
@@ -856,6 +1032,8 @@ public static class AssessmentWorkflow
             TestSfiPillar = check.SfiPillar,
             TestMinimumLicense = check.MinimumLicense,
             TestService = check.Service,
+            TestProfile = check.Profile,
+            TestManual = check.Manual,
             TestStatus = outcome.Status,
             TestSkipped = outcome.SkippedBecause,
             SkippedReason = outcome.SkippedBecause == SkipReason.None ? null : Vocabulary.SkipText(outcome.SkippedBecause, outcome.SkipDetail),
@@ -863,6 +1041,20 @@ public static class AssessmentWorkflow
             Recommendation = outcome.Status == TestStatus.Failed ? check.Recommendation : null,
             Resource = check.Framework == "cis-aws" ? input.Request.AwsAccountId : input.Request.TenantId,
         };
+
+        // Accepted risks (CIS suppressions): only Failed / Error can be suppressed, and only while the entry is unexpired.
+        if (finding.TestStatus is TestStatus.Failed or TestStatus.Error)
+        {
+            var sup = input.Request.Suppressions.FirstOrDefault(s => s.IsActive(DateTime.UtcNow) && s.Matches(finding));
+            if (sup is not null)
+            {
+                finding.TestStatus = TestStatus.Suppressed;
+                finding.SuppressionJustification = sup.Justification;
+                finding.TestResult = $"Suppressed as an accepted risk until {sup.Expires}.\n\n**Justification**\n\n{sup.Justification}\n\n---\n\n{finding.TestResult}";
+            }
+        }
+
+        return finding;
     }
 
     // Activity: tenant overview figures for the Overview page.
@@ -911,6 +1103,8 @@ public static class Api
             sfiPillars = Vocabulary.SfiPillars,
             graphScopes = Vocabulary.GraphScopes,
             skipReasons = Enum.GetNames<SkipReason>().Where(n => n != "None"),
+            statuses = Enum.GetNames<TestStatus>(),
+            cisLevels = new[] { 1, 2 },
             defaults = new AssessmentRequest(),
             checks = Catalog.All.Select(c => new
             {
@@ -918,6 +1112,7 @@ public static class Api
                 testRisk = c.Risk, testImpact = c.UserImpact, testImplementationCost = c.ImplementationCost,
                 testSfiPillar = c.SfiPillar, testTitle = c.Title, tenantType = c.TenantType, testService = c.Service,
                 testMinimumLicense = c.MinimumLicense, compatibleLicense = c.CompatibleLicense,
+                testProfile = c.Profile, testManual = c.Manual,
             }),
         };
         return WriteJson(req, HttpStatusCode.OK, payload);

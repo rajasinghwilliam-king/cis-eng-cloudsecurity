@@ -24,6 +24,12 @@
       --font-sans: 'Figtree', 'Aptos', 'Segoe UI', system-ui, sans-serif;
       --font-display: 'Archivo', var(--font-sans);
       --font-mono: 'IBM Plex Mono', ui-monospace, Consolas, monospace;
+      /* Chart palette. Status colours are the fixed status palette (good / critical / warning / serious) and always
+         ship with a legend and labels. Sequential teal ramp and the blue/orange pair were validated for this surface. */
+      --viz-pass: #0ca30c; --viz-fail: #d03b3b; --viz-warn: #fab219; --viz-err: #ec835a; --viz-none: #a8a69f;
+      --viz-seq-1: #6DB8B5; --viz-seq-2: #089AA7; --viz-seq-3: #00778B; --viz-seq-4: #003C51;
+      --viz-cat-1: #2A78D6; --viz-cat-2: #EB6834;
+      --viz-single: #00778B; --viz-grid: #e1e0d9; --viz-axis: #c3c2b7;
     }
     .dark {
       --bg: #002B3A; --bg-alt: #003C51; --bg-cool: #00354A; --card: #003C51;
@@ -32,6 +38,10 @@
       --hairline: rgba(255, 255, 255, .18); --rule-heavy: #FFFFFF; --track: rgba(255, 255, 255, .12);
       --series-1: #089AA7;   /* the deep teal series colour equals the dark card ground, so step to series-3 */
       --fail: #F28B82; --warn: #F2B560; --mute: #8FA7AE;
+      --viz-none: #7f8c91;
+      --viz-seq-1: #0F7A72; --viz-seq-2: #2E9B98; --viz-seq-3: #5EB5B3; --viz-seq-4: #9ECFCB;
+      --viz-cat-1: #3987E5; --viz-cat-2: #D95926;
+      --viz-single: #089AA7; --viz-grid: rgba(255, 255, 255, .14); --viz-axis: rgba(255, 255, 255, .3);
     }
 
     * { box-sizing: border-box; }
@@ -230,6 +240,32 @@
     .prose th, .prose td { padding: 6px 10px; }
     .prose em { color: var(--ink-soft); }
 
+    /* ---------- charts ---------- */
+    .viz-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 900px) { .viz-grid { grid-template-columns: 1fr; } }
+    .viz { padding: 16px 20px 18px; }
+    .viz svg { display: block; width: 100%; height: auto; overflow: visible; font-family: var(--font-sans); }
+    .viz text { fill: var(--ink-soft); font-size: 12px; }
+    .viz text.v { fill: var(--ink); font-family: var(--font-mono); font-weight: 500; }
+    .viz text.in { fill: #fff; font-family: var(--font-mono); font-size: 11px; font-weight: 500; }
+    .viz .mark { transition: opacity .15s; cursor: default; }
+    .viz .mark:hover { opacity: .8; }
+    .viz .mark.link { cursor: pointer; }
+    .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12px; color: var(--ink-soft); margin: 10px 0 2px; }
+    .legend span { display: inline-flex; align-items: center; gap: 7px; }
+    .legend i { display: inline-block; width: 14px; height: 3px; }
+    .hero { font-family: var(--font-sans); font-size: 44px; font-weight: 500; line-height: 1; color: var(--ink); }
+    .hero small { font-size: 14px; color: var(--ink-soft); margin-left: 6px; font-weight: 400; }
+    .viz-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+    .viz-head h2 { font-size: 16px; font-weight: 700; }
+    .viz-head .q { font-size: 12.5px; color: var(--ink-soft); margin-top: 3px; }
+    .viz-table table { font-size: 13px; }
+    .viz-table td.n, .viz-table th.n { text-align: right; font-family: var(--font-mono); }
+    .tip { position: fixed; z-index: 70; pointer-events: none; display: none; background: var(--card); color: var(--ink); border: 1px solid var(--hairline); padding: 8px 10px; font-size: 12.5px; max-width: 280px; line-height: 1.4; }
+    .tip b { font-family: var(--font-mono); font-weight: 500; }
+    .tip .k { color: var(--ink-soft); }
+    .s-Suppressed { border-color: var(--hairline); color: var(--ink-soft); text-decoration: line-through; }
+
     /* ---------- footer ---------- */
     footer { border-top: 1px solid var(--hairline); padding: 32px 0 24px; }
     footer .cols { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 32px; }
@@ -289,6 +325,7 @@
   </div>
 </footer>
 
+<div class="tip" id="tip" role="tooltip"></div>
 <div class="overlay" id="overlay"></div>
 <aside class="sheet" id="sheet" aria-hidden="true"><div class="inner" id="sheetBody"></div></aside>
 
@@ -301,8 +338,9 @@ const LOGO = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQgAAAElBAMAAADq6mEk
 
 const PILLARS = ["Identity", "Devices", "Network", "Data", "Infrastructure", "SecOps", "AI"];
 const RISK_ORDER = { Critical: 0, High: 1, Medium: 2, Low: 3, Unranked: 4 };
-const STATUS_ORDER = { Failed: 0, Error: 1, Investigate: 2, Passed: 3, Skipped: 4, Planned: 5, NotRun: 6 };
-const STATUS_LABEL = { NotRun: "Not run" };
+const STATUS_ORDER = { Failed: 0, Error: 1, Investigate: 2, Passed: 3, Suppressed: 4, Skipped: 5, Planned: 6, NotRun: 7 };
+const STATUS_LABEL = { NotRun: "Not run", Investigate: "Manual review" };
+const EXCLUDED = ["Skipped", "Planned", "Suppressed"];   // not scored, as in both source tools
 const COLS = [
   { id: "TestId", label: "ID" },
   { id: "TestTitle", label: "Name" },
@@ -399,7 +437,30 @@ function applyTheme() {
 $("#themeBtn").addEventListener("click", () => {
   localStorage.setItem("ust-theme", document.documentElement.classList.contains("dark") ? "light" : "dark");
   applyTheme();
+  route(); // charts read their palette from the active theme
 });
+
+/* Tooltip layer: any element with data-tip shows it on hover / focus. Text only, set via textContent. */
+const tip = $("#tip");
+function showTip(el, x, y) {
+  tip.innerHTML = "";
+  el.dataset.tip.split("\n").forEach((line, i) => {
+    const row = document.createElement("div");
+    const m = /^(.*?): (.*)$/.exec(line);
+    if (m) { const b = document.createElement("b"); b.textContent = m[2]; const k = document.createElement("span"); k.className = "k"; k.textContent = m[1] + " "; row.append(k, b); }
+    else { row.textContent = line; if (i === 0) row.style.fontWeight = "600"; }
+    tip.appendChild(row);
+  });
+  tip.style.display = "block";
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  tip.style.left = Math.min(x + 14, window.innerWidth - w - 8) + "px";
+  tip.style.top = (y + 16 + h > window.innerHeight ? y - h - 10 : y + 16) + "px";
+}
+document.addEventListener("pointermove", e => {
+  const el = e.target.closest?.("[data-tip]");
+  if (el) showTip(el, e.clientX, e.clientY); else tip.style.display = "none";
+});
+document.addEventListener("pointerleave", () => { tip.style.display = "none"; });
 
 /* ============================================================================
    Header: nav + tenant dropdown
@@ -434,13 +495,20 @@ document.addEventListener("click", () => document.querySelectorAll(".dropdown.op
    Router
    ============================================================================ */
 function route() {
-  const h = location.hash.replace(/^#\/?/, "").toLowerCase();
+  const raw = location.hash.replace(/^#\/?/, "");
+  const [path, qs] = raw.split("?");
+  const h = path.toLowerCase();
   renderNav(h);
   const main = $("#main");
   if (!state.catalog) { main.innerHTML = `<div class="card"><div class="progress"><span class="spinner"></span><span>Loading catalog</span></div></div>`; return; }
   if (h === "new") return renderForm(main);
   const pillar = PILLARS.find(p => p.toLowerCase() === h);
-  if (pillar) return renderPillar(main, pillar);
+  if (pillar) {
+    // Deep link from the Overview heatmap: #/identity?risk=High opens the failed tests at that risk.
+    const q = new URLSearchParams(qs || "");
+    if (q.get("risk")) { const ts = tableState(pillar); ts.risks = [q.get("risk")]; ts.statuses = ["Failed"]; ts.sfi = []; ts.q = ""; history.replaceState(null, "", `#/${h}`); }
+    return renderPillar(main, pillar);
+  }
   renderOverview(main);
 }
 window.addEventListener("hashchange", route);
@@ -480,16 +548,70 @@ function renderOverview(main) {
     return;
   }
 
-  const sum = arr(r.testResultSummary);
-  const fr = r.failedByRisk || {};
-  const riskRows = [["Critical", fr.critical], ["High", fr.high], ["Medium", fr.medium], ["Low", fr.low], ["Unranked", fr.unranked]].filter(x => x[1] != null);
-  const maxR = Math.max(...riskRows.map(x => Number(x[1]) || 0), 1);
+  const tests = arr(r.tests);
   const ti = r.tenantInfo || {};
-  const totalFailed = arr(r.tests).filter(t => t.testStatus === "Failed").length;
-  const totalSkipped = arr(r.tests).filter(t => t.testStatus === "Skipped").length;
+  const P = VIZ();
+  const count = (list, s) => list.filter(t => t.testStatus === s).length;
+  const executedOf = list => list.filter(t => !EXCLUDED.includes(t.testStatus));
+  const bucket = t => t.testStatus === "Passed" ? "Passed" : t.testStatus === "Failed" ? "Failed" : ["Investigate", "Error"].includes(t.testStatus) ? "Review" : "None";
+  const SERIES = [
+    { key: "Passed", label: "Passed", color: P.pass },
+    { key: "Failed", label: "Failed", color: P.fail },
+    { key: "Review", label: "Needs review (manual or error)", color: P.warn },
+    { key: "None", label: "Not scored (skipped, planned, suppressed)", color: P.none },
+  ];
+  const executed = executedOf(tests), passed = count(tests, "Passed"), totalFailed = count(tests, "Failed");
+  const score = executed.length ? Math.round(passed / executed.length * 100) : 0;
+  const rate = (p, n) => n ? `${Math.round(p / n * 100)}% (${p}/${n})` : "n/a";
   const num = v => v == null ? `<div class="num na">Not available</div>` : `<div class="num">${fmt(v)}</div>`;
 
-  main.innerHTML = pageHead("Overview", `${totalFailed} failed finding${totalFailed === 1 ? "" : "s"} to fix. ${arr(r.tests).length} tests run on ${esc(fmtDate(r.executedAt))}.`,
+  // --- Results by pillar (stacked) ---
+  const pillarsWithTests = PILLARS.filter(p => tests.some(t => arr(t.testPillar).includes(p)));
+  const pillarRows = pillarsWithTests.map(p => {
+    const list = tests.filter(t => arr(t.testPillar).includes(p)), segs = {};
+    list.forEach(t => { const b = bucket(t); segs[b] = (segs[b] || 0) + 1; });
+    return { label: p, segs, total: list.length, value: `${count(list, "Passed")}/${executedOf(list).length}`, href: `#/${p.toLowerCase()}` };
+  });
+
+  // --- Overall status (donut) ---
+  const statusParts = SERIES.map(s => ({ label: s.label, color: s.color, value: tests.filter(t => bucket(t) === s.key).length }));
+
+  // --- Failed by pillar and risk (heatmap) ---
+  const RISKS = ["Critical", "High", "Medium", "Low", "Unranked"].filter(rk => tests.some(t => t.testRisk === rk));
+  const failedTests = tests.filter(t => t.testStatus === "Failed");
+  const heatGet = (p, rk) => ({ value: failedTests.filter(t => arr(t.testPillar).includes(p) && t.testRisk === rk).length, href: `#/${p.toLowerCase()}?risk=${rk}` });
+
+  // --- Quick wins: risk x implementation effort for failed tests ---
+  const EFFORT = ["Low", "Medium", "High"];
+  const qwRows = RISKS.filter(rk => rk !== "Unranked");
+  const qwGet = (rk, ef) => ({ value: failedTests.filter(t => t.testRisk === rk && t.testImplementationCost === ef).length });
+  const quickWins = qwGet("Critical", "Low").value + qwGet("High", "Low").value;
+
+  // --- Pass rate by SFI pillar ---
+  const sfiItems = [...new Set(tests.map(t => t.testSfiPillar).filter(Boolean))].map(s => {
+    const list = executedOf(tests.filter(t => t.testSfiPillar === s)), p = count(list, "Passed"), v = list.length ? Math.round(p / list.length * 100) : 0;
+    return { label: s, value: v, display: rate(p, list.length), tip: [s, `Pass rate: ${v}%`, `Passed: ${p}`, `Executed: ${list.length}`] };
+  }).sort((a, b) => a.value - b.value);
+
+  // --- Top categories by failed tests ---
+  const catCounts = {};
+  failedTests.forEach(t => { const c = t.testCategory || "Uncategorised"; catCounts[c] = (catCounts[c] || 0) + 1; });
+  const catItems = Object.entries(catCounts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([c, n]) => ({ label: c, value: n, display: String(n), tip: [c, `Failed tests: ${n}`] }));
+
+  // --- CIS Azure: pass rate by section and profile level ---
+  const cisTests = tests.filter(t => t.framework === "cis-azure");
+  const cisSections = [...new Set(cisTests.map(t => t.testCategory))].sort();
+  const CIS_SERIES = [{ key: "L1", label: "Level 1 (baseline)", color: P.cat[0] }, { key: "L2", label: "Level 2 (defence in depth)", color: P.cat[1] }];
+  const cisRows = cisSections.map(sec => {
+    const values = {};
+    CIS_SERIES.forEach(s => {
+      const list = executedOf(cisTests.filter(t => t.testCategory === sec && t.testProfile === s.key)), p = count(list, "Passed");
+      if (list.length) values[s.key] = { value: Math.round(p / list.length * 100), display: rate(p, list.length) };
+    });
+    return { label: sec, values };
+  });
+
+  main.innerHTML = pageHead("Overview", `${totalFailed} failed finding${totalFailed === 1 ? "" : "s"} to fix, ${quickWins} of them quick wins. ${tests.length} tests run on ${esc(fmtDate(r.executedAt))}.`,
     `<button class="btn sm" id="dlBtn">Download JSON</button>`) + `
     <div class="stack">
       <div class="card strip">
@@ -504,48 +626,61 @@ function renderOverview(main) {
         <div class="card tile"><h3>${ICON.user} Users</h3><div class="pair"><div><div class="lab">Total users</div>${num(ti.userCount)}</div><div><div class="lab">Guest users</div>${num(ti.guestCount)}</div></div></div>
         <div class="card tile"><h3>${ICON.device} Devices</h3><div class="pair"><div><div class="lab">Total devices</div>${num(ti.deviceCount)}</div><div><div class="lab">Managed</div>${num(ti.managedDeviceCount)}</div></div></div>
         <div class="card tile"><h3>${ICON.group} Groups and apps</h3><div class="pair"><div><div class="lab">Groups</div>${num(ti.groupCount)}</div><div><div class="lab">Apps</div>${num(ti.applicationCount)}</div></div></div>
-        <div class="card tile"><h3>${ICON.shield} Run</h3><div class="pair"><div><div class="lab">Tests run</div><div class="num">${fmt(arr(r.tests).length - totalSkipped)}</div></div><div><div class="lab">Skipped</div><div class="num">${fmt(totalSkipped)}</div></div></div></div>
+        <div class="card tile"><h3>${ICON.shield} Compliance score</h3><div class="hero">${score}%<small>${passed} of ${executed.length} executed tests passed</small></div></div>
       </div>
+
+      <div class="viz-grid">
+        ${vizCard("Overall status", "Share of all tests by outcome. Not scored tests do not count toward the score.",
+          `<div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap"><div style="flex:0 0 220px">${donut(statusParts, `${score}%`, "compliant")}</div>
+           <div style="flex:1;min-width:200px">${legend(SERIES)}<div class="sum" style="display:grid;grid-template-columns:1fr auto;gap:6px 12px;font-size:14px;margin-top:10px">
+             ${statusParts.map(p => `<span>${esc(p.label.split(" (")[0])}</span><span class="mono" style="text-align:right">${p.value}</span>`).join("")}
+             <span style="border-top:1px solid var(--hairline);padding-top:6px;font-weight:600">All tests</span><span class="mono" style="border-top:1px solid var(--hairline);padding-top:6px;text-align:right">${tests.length}</span></div></div></div>`,
+          dataTable(["Outcome", "Tests", "Share"], statusParts.map(p => [p.label, p.value, `${Math.round(p.value / (tests.length || 1) * 100)}%`])))}
+        ${vizCard("Results by pillar", "Passed over executed tests per pillar. Click a bar to open that pillar.",
+          stackedBars(pillarRows, SERIES) + legend(SERIES),
+          dataTable(["Pillar", ...SERIES.map(s => s.label.split(" (")[0]), "Passed / executed"], pillarRows.map(p => [p.label, ...SERIES.map(s => p.segs[s.key] || 0), p.value])))}
+      </div>
+
+      <div class="viz-grid">
+        ${vizCard("Failed tests by pillar and risk", "Darker means more failed tests. Click a cell to open those findings.",
+          heatmap(pillarsWithTests, RISKS, heatGet),
+          dataTable(["Pillar", ...RISKS], pillarsWithTests.map(p => [p, ...RISKS.map(rk => heatGet(p, rk).value)])))}
+        ${vizCard("Quick wins", "Failed tests by risk and implementation effort. Start top left: high risk, low effort.",
+          heatmap(qwRows, EFFORT.map(e => `${e} effort`), (rk, ef) => qwGet(rk, ef.split(" ")[0])),
+          dataTable(["Risk", ...EFFORT.map(e => `${e} effort`)], qwRows.map(rk => [rk, ...EFFORT.map(ef => qwGet(rk, ef).value)])))}
+      </div>
+
+      <div class="viz-grid">
+        ${sfiItems.length ? vizCard("Pass rate by Secure Future Initiative pillar", "Lowest pass rate first. Percent of executed tests that passed.",
+          hbars(sfiItems, { max: 100, label: "Pass rate by SFI pillar" }),
+          dataTable(["SFI pillar", "Pass rate"], sfiItems.map(i => [i.label, i.display]))) : ""}
+        ${catItems.length ? vizCard("Categories with most failed tests", "Top categories across all frameworks.",
+          hbars(catItems, { label: "Failed tests by category" }),
+          dataTable(["Category", "Failed tests"], catItems.map(i => [i.label, i.value]))) : ""}
+      </div>
+
+      ${cisRows.length ? vizCard("CIS Microsoft Azure Foundations Benchmark v5.0.0: pass rate by section", `${cisTests.length} controls in scope, ${cisTests.filter(t => t.testManual).length} need manual review, ${count(cisTests, "Suppressed")} suppressed as accepted risk. Percent of executed controls that passed, per profile level.`,
+          groupedBars(cisRows, CIS_SERIES) + legend(CIS_SERIES),
+          dataTable(["Section", ...CIS_SERIES.map(s => s.label)], cisRows.map(rw => [rw.label, ...CIS_SERIES.map(s => rw.values[s.key]?.display || "n/a")]))) : ""}
 
       <div class="card">
-        <div class="hd"><h2>Assessment</h2><span class="muted" style="font-size:13px">Passed / executed tests per pillar. Skipped and planned tests are excluded from the total.</span></div>
-        <div class="bd"><div class="grid g7">
-          ${sum.map(s => `
-            <a class="score" href="#/${s.pillar.toLowerCase()}" style="color:inherit">
-              <div class="lab">${esc(s.pillar)}</div>
-              <div class="num">${s.passed}/${s.total}<small>tests</small></div>
-              <div class="track"><i style="width:${pct(s.passed, s.total)}%"></i></div>
-              <div class="note">${s.failed} failed${s.skipped ? `, ${s.skipped} skipped` : ""}</div>
-            </a>`).join("")}
-        </div></div>
-      </div>
-
-      <div class="grid g2">
-        <div class="card">
-          <div class="hd"><h2>Failed findings by risk</h2></div>
-          <div class="bd"><div class="bars">
-            ${riskRows.map(([l, n]) => `<span class="l">${l}</span><span class="b"><i style="width:${((Number(n) || 0) / maxR) * 100}%"></i></span><span class="n">${n}</span>`).join("")}
-          </div>
-          <p class="hint" style="margin:14px 0 0">Start with Critical and High. Each row is a count of failed tests at that risk level across all pillars.</p></div>
-        </div>
-        <div class="card">
-          <div class="hd"><h2>Top failed findings</h2></div>
-          <div class="bd" style="padding:0">
-            <table><tbody>
-              ${arr(r.tests).filter(t => t.testStatus === "Failed").slice(0, 8).map(t => `
-                <tr data-open="${esc(t.testId)}"><td style="width:90px">${riskCell(t.testRisk)}</td><td>${esc(t.testTitle)}<div class="mute2" style="font-size:12px">${esc(arr(t.testPillar).join(", "))} ${t.testCategory ? "/ " + esc(t.testCategory) : ""}</div></td></tr>`).join("") ||
-                `<tr><td class="empty">No failed findings.</td></tr>`}
-            </tbody></table>
-          </div>
+        <div class="hd"><h2>Top failed findings</h2><span class="muted" style="font-size:13px">Highest risk first. Click a row for details.</span></div>
+        <div class="bd" style="padding:0">
+          <table><tbody>
+            ${failedTests.slice(0, 8).map(t => `
+              <tr data-open="${esc(t.testId)}"><td style="width:90px">${riskCell(t.testRisk)}</td><td>${esc(t.testTitle)}<div class="mute2" style="font-size:12px">${esc(arr(t.testPillar).join(", "))} ${t.testCategory ? "/ " + esc(t.testCategory) : ""}</div></td></tr>`).join("") ||
+              `<tr><td class="empty">No failed findings.</td></tr>`}
+          </tbody></table>
         </div>
       </div>
     </div>`;
 
+  wireViz(main);
   $("#dlBtn")?.addEventListener("click", () => {
     const blob = new Blob([JSON.stringify(r, null, 2)], { type: "application/json" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `ust-assessment-${r.tenantId || "report"}.json`; a.click();
   });
-  main.querySelectorAll("tr[data-open]").forEach(tr => tr.addEventListener("click", () => openSheet(arr(r.tests).find(t => t.testId === tr.dataset.open))));
+  main.querySelectorAll("tr[data-open]").forEach(tr => tr.addEventListener("click", () => openSheet(tests.find(t => t.testId === tr.dataset.open))));
 }
 
 function pageHead(title, sub, actions = "") {
@@ -558,6 +693,139 @@ function progressCard() {
   return `<div class="card"><div class="progress"><span class="spinner"></span>
     <div><div style="font-weight:600">${run?.status === "Pending" ? "Starting assessment" : "Running checks against the target"}</div>
     <div class="hint">${total ? `${total} checks in scope.` : ""} Durable status: ${esc(run?.status || "Pending")}. Instance <span class="mono">${esc(run?.id || "")}</span></div></div></div></div>`;
+}
+
+/* ============================================================================
+   Charts: inline SVG, palette from CSS tokens, tooltip via data-tip, table view per chart
+   ============================================================================ */
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const VIZ = () => ({
+  pass: css("--viz-pass"), fail: css("--viz-fail"), warn: css("--viz-warn"), err: css("--viz-err"), none: css("--viz-none"),
+  seq: [css("--viz-seq-1"), css("--viz-seq-2"), css("--viz-seq-3"), css("--viz-seq-4")],
+  cat: [css("--viz-cat-1"), css("--viz-cat-2")], single: css("--viz-single"), grid: css("--viz-grid"), axis: css("--viz-axis"),
+  surface: css("--card") || "#ffffff",
+});
+const tipAttr = lines => `data-tip="${esc(lines.join("\n"))}"`;
+const trunc = (s, n) => (s || "").length > n ? s.slice(0, n - 1) + "…" : (s || "");
+// Ink that reads on a given fill (white on dark fills, page ink on light fills).
+function inkOn(hex) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());
+  if (!m) return "var(--ink)";
+  const lum = [m[1], m[2], m[3]].map(h => { const c = parseInt(h, 16) / 255; return c <= .03928 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4; });
+  return (.2126 * lum[0] + .7152 * lum[1] + .0722 * lum[2]) > .4 ? "#1A1A1A" : "#FFFFFF";
+}
+// Horizontal bar: square at the baseline, 4px rounded data end.
+function barPath(x, y, w, h) { if (w <= 0) return ""; const r = Math.min(4, w, h / 2); return `M${x},${y} h${w - r} a${r},${r} 0 0 1 ${r},${r} v${h - 2 * r} a${r},${r} 0 0 1 -${r},${r} h-${w - r} z`; }
+const legend = items => `<div class="legend">${items.map(i => `<span><i style="background:${i.color}"></i>${esc(i.label)}</span>`).join("")}</div>`;
+
+function vizCard(title, question, chartHtml, tableHtml, extra = "") {
+  const id = "viz" + Math.random().toString(36).slice(2, 8);
+  return `<div class="card viz ${extra}" id="${id}">
+    <div class="viz-head"><div><h2>${esc(title)}</h2>${question ? `<div class="q">${esc(question)}</div>` : ""}</div>
+      <button class="btn sm ghost" data-toggle="${id}" aria-pressed="false">Table</button></div>
+    <div class="viz-chart">${chartHtml}</div>
+    <div class="viz-table" style="display:none">${tableHtml}</div></div>`;
+}
+function wireViz(root) {
+  root.querySelectorAll("[data-toggle]").forEach(b => b.addEventListener("click", () => {
+    const card = document.getElementById(b.dataset.toggle);
+    const showTable = card.querySelector(".viz-table").style.display === "none";
+    card.querySelector(".viz-table").style.display = showTable ? "block" : "none";
+    card.querySelector(".viz-chart").style.display = showTable ? "none" : "block";
+    b.textContent = showTable ? "Chart" : "Table"; b.setAttribute("aria-pressed", String(showTable));
+  }));
+  root.querySelectorAll(".mark.link[data-href]").forEach(m => m.addEventListener("click", () => { location.hash = m.dataset.href; }));
+}
+const dataTable = (headers, rows) => `<table><thead><tr>${headers.map((h, i) => `<th class="${i ? "n" : ""}">${esc(h)}</th>`).join("")}</tr></thead>
+  <tbody>${rows.map(r => `<tr style="cursor:default">${r.map((c, i) => `<td class="${i ? "n" : ""}">${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+
+// Stacked horizontal bars. rows: [{label, segs:{key:n}, total, value, href}]; series: [{key,label,color}]
+function stackedBars(rows, series) {
+  const P = VIZ(), labelW = 110, valueW = 72, H = 22, gap = 14, W = 640, plotW = W - labelW - valueW;
+  const max = Math.max(...rows.map(r => r.total), 1);
+  let out = `<svg viewBox="0 0 ${W} ${rows.length * (H + gap) - gap}" role="img" aria-label="Results by pillar">`;
+  rows.forEach((r, i) => {
+    const y = i * (H + gap); let x = labelW;
+    out += `<text x="${labelW - 10}" y="${y + H / 2 + 4}" text-anchor="end">${esc(r.label)}</text>`;
+    out += `<rect x="${labelW}" y="${y}" width="${plotW}" height="${H}" fill="${P.grid}" opacity=".5"/>`;
+    const tipLines = [r.label, ...series.map(t => `${t.label}: ${r.segs[t.key] || 0}`)];
+    series.forEach(s => {
+      const v = r.segs[s.key] || 0; if (!v) return;
+      const w = (v / max) * plotW;
+      out += `<rect class="mark ${r.href ? "link" : ""}" ${r.href ? `data-href="${r.href}"` : ""} x="${x}" y="${y}" width="${Math.max(w - 2, 0)}" height="${H}" fill="${s.color}" ${tipAttr(tipLines)}/>`;
+      if (w >= 30) out += `<text class="in" x="${x + w / 2 - 1}" y="${y + H / 2 + 4}" text-anchor="middle" pointer-events="none" style="fill:${inkOn(s.color)}">${v}</text>`;
+      x += w;
+    });
+    out += `<text class="v" x="${W}" y="${y + H / 2 + 4}" text-anchor="end">${esc(r.value)}</text>`;
+  });
+  return out + `</svg>`;
+}
+
+// Donut with a hero figure in the centre. parts: [{label, value, color}]
+function donut(parts, big, small) {
+  const P = VIZ(), R = 72, r = 50, cx = 90, cy = 90, live = parts.filter(p => p.value > 0), total = parts.reduce((a, p) => a + p.value, 0) || 1;
+  let a0 = -Math.PI / 2, out = `<svg viewBox="0 0 180 180" role="img" aria-label="Overall status" style="max-width:220px">`;
+  live.forEach(p => {
+    const a1 = a0 + (p.value / total) * Math.PI * 2, large = a1 - a0 > Math.PI ? 1 : 0;
+    const d = live.length === 1
+      ? `M${cx + R},${cy} A${R},${R} 0 1 1 ${cx - R},${cy} A${R},${R} 0 1 1 ${cx + R},${cy} M${cx + r},${cy} A${r},${r} 0 1 0 ${cx - r},${cy} A${r},${r} 0 1 0 ${cx + r},${cy}`
+      : `M${cx + R * Math.cos(a0)},${cy + R * Math.sin(a0)} A${R},${R} 0 ${large} 1 ${cx + R * Math.cos(a1)},${cy + R * Math.sin(a1)} L${cx + r * Math.cos(a1)},${cy + r * Math.sin(a1)} A${r},${r} 0 ${large} 0 ${cx + r * Math.cos(a0)},${cy + r * Math.sin(a0)} z`;
+    out += `<path class="mark" d="${d}" fill="${p.color}" fill-rule="evenodd" stroke="${P.surface}" stroke-width="2" ${tipAttr([p.label, `Tests: ${p.value}`, `Share: ${Math.round(p.value / total * 100)}%`])}/>`;
+    a0 = a1;
+  });
+  out += `<text x="${cx}" y="${cy + 2}" text-anchor="middle" style="font-size:32px;font-weight:500;fill:var(--ink)">${esc(big)}</text>`;
+  out += `<text x="${cx}" y="${cy + 22}" text-anchor="middle">${esc(small)}</text></svg>`;
+  return out;
+}
+
+// Heatmap. get(row, col) -> {value, href}
+function heatmap(rows, cols, get, measure = "Failed tests") {
+  const P = VIZ(), labelW = 110, cw = 92, ch = 34, W = labelW + cols.length * cw, H = 20 + rows.length * ch;
+  const max = Math.max(1, ...rows.flatMap(r => cols.map(c => get(r, c).value)));
+  let out = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(measure)} heatmap" style="max-width:${W}px">`;
+  cols.forEach((c, j) => out += `<text x="${labelW + j * cw + cw / 2}" y="12" text-anchor="middle">${esc(c)}</text>`);
+  rows.forEach((r, i) => {
+    out += `<text x="${labelW - 10}" y="${20 + i * ch + ch / 2 + 4}" text-anchor="end">${esc(r)}</text>`;
+    cols.forEach((c, j) => {
+      const cell = get(r, c), v = cell.value, step = v === 0 ? null : Math.min(3, Math.floor((v / max) * 4));
+      const fill = step === null ? P.grid : P.seq[step];
+      out += `<rect class="mark ${cell.href ? "link" : ""}" ${cell.href ? `data-href="${cell.href}"` : ""} x="${labelW + j * cw + 1}" y="${20 + i * ch + 1}" width="${cw - 2}" height="${ch - 2}" fill="${fill}" ${step === null ? 'opacity=".5"' : ""} ${tipAttr([`${r}, ${c}`, `${measure}: ${v}`])}/>`;
+      out += `<text class="v" x="${labelW + j * cw + cw / 2}" y="${20 + i * ch + ch / 2 + 4}" text-anchor="middle" pointer-events="none" style="fill:${step === null ? "var(--ink-mute)" : inkOn(fill)}">${v}</text>`;
+    });
+  });
+  return out + `</svg>`;
+}
+
+// Single-series horizontal bars. items: [{label, value, display, href, tip}]
+function hbars(items, opts = {}) {
+  const P = VIZ(), labelW = opts.labelW || 210, valueW = 90, H = 18, gap = 12, W = 640, plotW = W - labelW - valueW;
+  const max = opts.max ?? Math.max(...items.map(i => i.value), 1);
+  let out = `<svg viewBox="0 0 ${W} ${items.length * (H + gap) - gap}" role="img" aria-label="${esc(opts.label || "Bars")}">`;
+  items.forEach((it, i) => {
+    const y = i * (H + gap), w = (it.value / max) * plotW;
+    out += `<text x="${labelW - 10}" y="${y + H / 2 + 4}" text-anchor="end">${esc(trunc(it.label, 30))}</text>`;
+    out += `<rect x="${labelW}" y="${y}" width="${plotW}" height="${H}" fill="${P.grid}" opacity=".5"/>`;
+    out += `<path class="mark ${it.href ? "link" : ""}" ${it.href ? `data-href="${it.href}"` : ""} d="${barPath(labelW, y, w, H)}" fill="${opts.color || P.single}" ${tipAttr(it.tip || [it.label, `Value: ${it.display ?? it.value}`])}/>`;
+    out += `<text class="v" x="${W}" y="${y + H / 2 + 4}" text-anchor="end">${esc(it.display ?? it.value)}</text>`;
+  });
+  return out + `</svg>`;
+}
+
+// Grouped horizontal bars on a 0..100 scale. rows: [{label, values:{key:{value, display}}}]; series: [{key,label,color}]
+function groupedBars(rows, series) {
+  const P = VIZ(), labelW = 180, H = 12, inner = 2, gap = 14, W = 640, plotW = W - labelW - 70, groupH = series.length * (H + inner) - inner;
+  let out = `<svg viewBox="0 0 ${W} ${rows.length * (groupH + gap) - gap}" role="img" aria-label="Pass rate by section and level" style="max-width:760px">`;
+  rows.forEach((r, i) => {
+    const y0 = i * (groupH + gap);
+    out += `<text x="${labelW - 10}" y="${y0 + groupH / 2 + 4}" text-anchor="end">${esc(trunc(r.label, 28))}</text>`;
+    series.forEach((s, k) => {
+      const y = y0 + k * (H + inner), cell = r.values[s.key]; if (!cell) return;
+      out += `<rect x="${labelW}" y="${y}" width="${plotW}" height="${H}" fill="${P.grid}" opacity=".5"/>`;
+      out += `<path class="mark" d="${barPath(labelW, y, (cell.value / 100) * plotW, H)}" fill="${s.color}" ${tipAttr([r.label, `${s.label}: ${cell.display}`])}/>`;
+      out += `<text class="v" x="${W}" y="${y + H / 2 + 4}" text-anchor="end" style="font-size:11px">${esc(cell.display)}</text>`;
+    });
+  });
+  return out + `</svg>`;
 }
 
 /* ============================================================================
@@ -579,7 +847,7 @@ function rowsFor(pillar) {
 function cellOf(t, id) {
   switch (id) {
     case "TestId": return `<td class="id">${esc(t.testId)}</td>`;
-    case "TestTitle": return `<td>${esc(t.testTitle)}${t.framework && t.framework !== "zero-trust" ? ` <span class="pill">${esc(fwName(t.framework))}</span>` : ""}</td>`;
+    case "TestTitle": return `<td>${t.framework === "cis-azure" ? `<span class="mono muted" style="font-size:12px;margin-right:8px">${esc(t.testId)}</span>` : ""}${esc(t.testTitle)}${t.framework && t.framework !== "zero-trust" ? ` <span class="pill">${esc(fwName(t.framework).replace(" Microsoft Azure Foundations Benchmark v5.0.0", " Azure"))}</span>` : ""}${t.testProfile ? `<span class="pill">${esc(t.testProfile)}</span>` : ""}${t.testManual ? `<span class="pill">Manual</span>` : ""}</td>`;
     case "TestCategory": return `<td class="muted">${esc(t.testCategory || "N/A")}</td>`;
     case "TestSfiPillar": return `<td>${t.testSfiPillar ? `<span class="pill">${esc(t.testSfiPillar)}</span>` : '<span class="muted">N/A</span>'}</td>`;
     case "TestMinimumLicense": return `<td>${arr(t.testMinimumLicense).length ? arr(t.testMinimumLicense).map(l => `<span class="pill">${esc(l)}</span>`).join("") : '<span class="muted">N/A</span>'}</td>`;
@@ -624,7 +892,7 @@ function renderPillar(main, pillar) {
   const anyFilter = ts.sfi.length || ts.risks.length || ts.statuses.length || ts.showSkipped || ts.q;
   const statusClass = s => s === "Passed" ? "ok" : (s === "Failed" || s === "Error") ? "fail" : "mute";
 
-  main.innerHTML = pageHead(pillar, live ? `${all.filter(t => t.testStatus === "Failed").length} failed of ${all.filter(t => !["Skipped", "Planned"].includes(t.testStatus)).length} executed tests in this pillar.` : `${all.length} checks in the catalog for this pillar.`) + `
+  main.innerHTML = pageHead(pillar, live ? `${all.filter(t => t.testStatus === "Failed").length} failed of ${all.filter(t => !EXCLUDED.includes(t.testStatus)).length} executed tests in this pillar.` : `${all.length} checks in the catalog for this pillar.`) + `
     <div class="card">
       <div class="hd"><h2>Assessment results</h2>
         <div class="desc">${live ? "Results are based on the security principles in the <a href=\"https://learn.microsoft.com/entra/fundamentals/configure-security\" target=\"_blank\" rel=\"noreferrer\">Configuring Microsoft Entra for increased security</a> guide and the UST ISO 27001 / CIS catalogs." : "Showing the check catalog. <a href=\"#/new\">Run an assessment</a> to replace this with live results."}</div>
@@ -695,6 +963,8 @@ function openSheet(t) {
       ${kv("Pillar", esc(arr(t.testPillar).join(", ")))}
       ${kv("SFI pillar", esc(t.testSfiPillar || "N/A"))}
       ${kv("Framework", esc(fwName(t.framework)))}
+      ${t.testProfile ? kv("CIS profile", esc(t.testProfile === "L1" ? "Level 1 (baseline)" : "Level 2 (defence in depth)")) : ""}
+      ${t.framework === "cis-azure" ? kv("Audit method", t.testManual ? "Manual review" : "Automated") : ""}
       ${arr(t.testService).length ? kv("Connects to", arr(t.testService).map(s => `<span class="pill">${esc(s)}</span>`).join("")) : ""}
       ${t.resource ? kv("Target", `<span class="mono" style="font-size:12.5px">${esc(t.resource)}</span>`) : ""}
     </div></div></div>
@@ -704,6 +974,7 @@ function openSheet(t) {
       <div class="bd prose">
         ${notRun ? `<p class="muted">This check has not been run yet. <a href="#/new">Start an assessment</a> that includes the ${esc(arr(t.testPillar)[0])} pillar.</p>` : ""}
         ${t.skippedReason ? `<div class="notice">${md(t.skippedReason)}</div>` : ""}
+        ${t.suppressionJustification ? `<div class="notice">Accepted risk. ${esc(t.suppressionJustification)}</div>` : ""}
         ${md(t.testResult) || (!notRun && !t.skippedReason ? `<p class="muted">No result text was recorded.</p>` : "")}
       </div>
     </div>
@@ -790,6 +1061,19 @@ function renderForm(main) {
           <textarea class="in mono" id="subscriptionIds" name="subscriptionIds" placeholder="00000000-0000-0000-0000-000000000000">${esc(arr(v("subscriptionIds", [])).join("\n"))}</textarea>
         </fieldset>
 
+        <fieldset id="cisBox" style="display:none">
+          <legend>CIS Azure Benchmark</legend>
+          <div class="hint">Options from the CIS Azure Benchmark Audit Tool. The profile level restricts the run to Level 1 (baseline) or Level 2 (defence in depth) controls. Suppressions mark accepted risks: the finding stays in the report, greyed out with your justification, and is excluded from the score. Only failed or errored controls can be suppressed, and an entry expires after at most one year.</div>
+          <label class="f" for="cisLevel">Profile level <small>(--level)</small></label>
+          <select class="in" id="cisLevel" name="cisLevel">
+            <option value="" ${!v("cisLevel") ? "selected" : ""}>Both levels</option>
+            <option value="1" ${String(v("cisLevel")) === "1" ? "selected" : ""}>Level 1 only</option>
+            <option value="2" ${String(v("cisLevel")) === "2" ? "selected" : ""}>Level 2 only</option>
+          </select>
+          <label class="f" for="suppressions">Suppressions <small>(suppressions.toml; one per line: control ID | justification | expires YYYY-MM-DD | resource, optional)</small></label>
+          <textarea class="in mono" id="suppressions" name="suppressions" placeholder="7.1 | Intentional RDP jump host behind Azure Firewall | 2027-03-31 | jumphost-nsg">${esc(arr(v("suppressions", [])).map(s => [s.controlId, s.justification, s.expires, s.resource].filter(Boolean).join(" | ")).join("\n"))}</textarea>
+        </fieldset>
+
         <details class="adv">
           <summary>Sign-in logs</summary>
           <div class="two">
@@ -857,6 +1141,11 @@ function renderForm(main) {
       testThrottleLimit: Number(fd.get("testThrottleLimit") || 5),
       testTimeoutMinutes: Number(fd.get("testTimeoutMinutes") || 0),
       preview: fd.get("preview") === "on",
+      cisLevel: fd.get("cisLevel") ? Number(fd.get("cisLevel")) : null,
+      suppressions: (fd.get("suppressions") || "").split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(l => {
+        const [controlId, justification, expires, resource] = l.split("|").map(x => (x || "").trim());
+        return { controlId, justification, expires, resource: resource || null };
+      }),
     };
   };
 
@@ -869,11 +1158,13 @@ function renderForm(main) {
     syncAll("services"); syncAll("pillars");
     const r = read();
     $("#awsBox").style.display = r.frameworks.includes("cis-aws") ? "block" : "none";
+    $("#cisBox").style.display = r.frameworks.includes("cis-azure") ? "block" : "none";
     const selected = cat.checks.filter(c =>
       r.frameworks.includes(c.framework) &&
       (r.pillars.includes("All") || arr(c.testPillar).some(p => r.pillars.includes(p))) &&
       (!r.tests.length || r.tests.includes(String(c.testId))) &&
-      (!arr(c.tenantType).length || arr(c.tenantType).includes(r.tenantType)));
+      (!arr(c.tenantType).length || arr(c.tenantType).includes(r.tenantType)) &&
+      (!r.cisLevel || !c.testProfile || c.testProfile === "L" + r.cisLevel));
     const byP = PILLARS.map(p => [p, selected.filter(c => arr(c.testPillar).includes(p)).length]).filter(x => x[1]);
     const skipped = selected.filter(c => arr(c.testService).some(s => !(r.services.includes("All") || r.services.includes(s)))).length;
     $("#scopeSum").innerHTML = byP.map(([p, n]) => `<span>${p}</span><span class="n">${n}</span>`).join("") +
@@ -882,7 +1173,7 @@ function renderForm(main) {
     $("#scopeNote").textContent = selected.length ? `${selected.length} checks will run.` : "Nothing selected.";
   };
   form.addEventListener("change", refresh);
-  form.addEventListener("input", e => { if (e.target.id === "tests") refresh(); });
+  form.addEventListener("input", e => { if (e.target.id === "tests" || e.target.id === "cisLevel") refresh(); });
   refresh();
 
   form.addEventListener("submit", async e => {

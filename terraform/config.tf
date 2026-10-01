@@ -15,7 +15,7 @@ locals {
   always_on                = try(local.config.always_on, false)
   zone_balancing_enabled   = try(local.config.zone_balancing_enabled, false)
   functions_worker_runtime = try(local.config.functions_worker_runtime, "dotnet-isolated")
-  dotnet_version           = try(local.config.dotnet_version, "v8.0")
+  dotnet_version           = try(local.config.dotnet_version, "v10.0")
   storage_replication_type = try(local.config.storage_replication_type, "LRS")
 
   # Storage public access toggle (demo: dev on, prd private). Empty allowed_ip_rules with
